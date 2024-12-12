@@ -7,7 +7,7 @@ from flask import Flask
 from threading import Thread
 from alpaca_trade_api.rest import REST
 
-# Alpaca API Credentials (stored securely in environment variables)
+# Alpaca API Credentials (stored securely in Render's Environment)
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"  # Paper trading endpoint
@@ -25,6 +25,7 @@ QUANTITY = 1000  # Number of shares to trade
 logging.basicConfig(filename="bot.log", level=logging.INFO, format="%(asctime)s - %(message)s")
 logging.info("Trading bot initialized.")
 
+
 def calculate_atr(high, low, close, period):
     """Calculate the Average True Range (ATR)."""
     tr1 = high - low
@@ -33,6 +34,7 @@ def calculate_atr(high, low, close, period):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     atr = tr.rolling(window=period).mean()
     return atr
+
 
 def supertrend(high, low, close, atr, factor):
     """Calculate the SuperTrend."""
@@ -61,13 +63,21 @@ def supertrend(high, low, close, atr, factor):
 
     return supertrend, direction
 
+
 def fetch_market_data(symbol, limit=100):
     """Fetch historical 5-minute market data from Alpaca."""
     logging.info(f"Fetching 5-minute market data for {symbol}...")
-    bars = api.get_bars(symbol, "5Min", limit=limit).df  # Pass "5Min" directly as the timeframe
-    bars = bars.tz_convert("America/New_York")  # Convert to your timezone
-    logging.info(f"Fetched {len(bars)} data points.")
-    return bars
+    try:
+        bars = api.get_bars(symbol, "5Min", limit=limit).df
+        bars = bars.tz_convert("America/New_York")  # Convert to your timezone
+        logging.info(f"Fetched {len(bars)} data points.")
+        print("Market Data:\n", bars.tail())
+        return bars
+    except Exception as e:
+        logging.error(f"Error fetching market data: {e}")
+        print(f"Error fetching market data: {e}")
+        return pd.DataFrame()
+
 
 def execute_trade(symbol, quantity, side):
     """Place a buy or sell order."""
@@ -83,15 +93,28 @@ def execute_trade(symbol, quantity, side):
         logging.info(f"{side.capitalize()} order submitted successfully.")
     except Exception as e:
         logging.error(f"Failed to execute {side} order: {e}")
+        print(f"Failed to execute {side} order: {e}")
+
 
 def trading_bot():
     """Main trading bot logic."""
     logging.info("Trading bot started.")
     print("Trading bot started.")
+    try:
+        account = api.get_account()
+        print("Alpaca Account Status:", account.status)
+    except Exception as e:
+        print("Error connecting to Alpaca API:", e)
+        return
+
     while True:
         try:
             print("Fetching market data...")
             data = fetch_market_data(SYMBOL, limit=ATR_LEN + 1)
+            if data.empty:
+                print("No market data available. Retrying in 5 minutes...")
+                time.sleep(300)
+                continue
 
             print("Calculating SuperTrend...")
             data["atr"] = calculate_atr(data["high"], data["low"], data["close"], ATR_LEN)
@@ -132,6 +155,7 @@ def trading_bot():
             print(f"Error in trading bot: {e}")
             time.sleep(300)  # Retry after a delay
 
+
 # Flask Web Server for Uptime Monitoring
 app = Flask(__name__)
 
@@ -139,14 +163,19 @@ app = Flask(__name__)
 def home():
     return "Bot is running!", 200
 
-PORT = int(os.environ.get("PORT", 8080))  # Default to 8080 if PORT not set
 
 def run_web_server():
     """Run the Flask web server."""
+    PORT = int(os.environ.get("PORT", 8080))  # Default to 8080 if PORT not set
     app.run(host="0.0.0.0", port=PORT)
 
+
+# Run Flask Web Server and Trading Bot
 if __name__ == "__main__":
+    # Start the web server in a separate thread
     thread = Thread(target=run_web_server)
     thread.daemon = True
     thread.start()
+
+    # Start the trading bot
     trading_bot()
