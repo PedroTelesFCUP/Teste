@@ -103,39 +103,52 @@ def execute_trade(symbol, quantity, side):
         print(f"Failed to execute {side} order: {e}")
 
 
+def log_account_activity():
+    """Fetch and log recent account activity."""
+    try:
+        logging.info("Fetching account activity...")
+        activities = api.get_activities()
+        for activity in activities[:5]:  # Limit to the last 5 activities
+            logging.info(f"Activity: {activity}")
+    except Exception as e:
+        logging.error(f"Error fetching account activity: {e}")
+
+
 def trading_bot():
     """Main trading bot logic."""
     logging.info("Trading bot started.")
     print("Trading bot started.")
     try:
         account = api.get_account()
-        print("Alpaca Account Status:", account.status)
+        logging.info(f"Alpaca Account Status: {account.status}")
     except Exception as e:
-        print("Error connecting to Alpaca API:", e)
+        logging.error(f"Error connecting to Alpaca API: {e}")
         return
 
     while True:
+        logging.info("Heartbeat: Starting a new cycle.")
         try:
-            print("Fetching market data...")
+            log_account_activity()  # Log account activities at the start of each cycle
+
+            logging.info("Fetching market data...")
             data = fetch_market_data(SYMBOL, limit=ATR_LEN + 1)
             if data.empty:
-                print("No market data available. Retrying in 5 minutes...")
+                logging.warning("No market data available. Retrying in 5 minutes...")
                 time.sleep(300)
                 continue
 
-            print("Calculating SuperTrend...")
+            logging.info("Calculating SuperTrend...")
             data["atr"] = calculate_atr(data["high"], data["low"], data["close"], ATR_LEN)
             data["supertrend"], data["direction"] = supertrend(
                 data["high"], data["low"], data["close"], data["atr"], FACTOR
             )
-            print("SuperTrend calculation complete.")
 
-            # Log current SuperTrend values and decision factors
+            # Log details
             latest_price = data["close"].iloc[-1]
             latest_supertrend = data["supertrend"].iloc[-1]
+            atr_value = data["atr"].iloc[-1]
             latest_direction = data["direction"].iloc[-1]
             previous_direction = data["direction"].iloc[-2]
-            atr_value = data["atr"].iloc[-1]
 
             logging.info(f"Latest Price: {latest_price}")
             logging.info(f"Latest SuperTrend Value: {latest_supertrend}")
@@ -143,11 +156,10 @@ def trading_bot():
             logging.info(f"Current Direction: {latest_direction}")
             logging.info(f"Previous Direction: {previous_direction}")
 
-            # Determine buy/sell signals
+            # Trade signals
             if latest_direction == 1 and previous_direction == -1:
                 logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
-
             elif latest_direction == -1 and previous_direction == 1:
                 logging.info(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
@@ -159,8 +171,7 @@ def trading_bot():
 
         except Exception as e:
             logging.error(f"Error in trading bot: {e}")
-            print(f"Error in trading bot: {e}")
-            time.sleep(300)  # Retry after a delay
+            time.sleep(300)
 
 
 # Flask Web Server for Uptime Monitoring
@@ -186,3 +197,4 @@ if __name__ == "__main__":
 
     # Start the trading bot
     trading_bot()
+
