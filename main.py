@@ -22,7 +22,14 @@ SYMBOL = "TSLA"  # Tesla stock
 QUANTITY = 1000  # Number of shares to trade
 
 # Configure Logging
-logging.basicConfig(filename="bot.log", level=logging.INFO, format="%(asctime)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log"),  # Log to file
+        logging.StreamHandler()         # Log to console
+    ]
+)
 logging.info("Trading bot initialized.")
 
 
@@ -130,24 +137,24 @@ def trading_bot():
             previous_direction = data["direction"].iloc[-2]
             atr_value = data["atr"].iloc[-1]
 
-            print(f"Latest Price: {latest_price}")
-            print(f"Latest SuperTrend Value: {latest_supertrend}")
-            print(f"ATR Value: {atr_value}")
-            print(f"Current Direction: {latest_direction}")
-            print(f"Previous Direction: {previous_direction}")
+            logging.info(f"Latest Price: {latest_price}")
+            logging.info(f"Latest SuperTrend Value: {latest_supertrend}")
+            logging.info(f"ATR Value: {atr_value}")
+            logging.info(f"Current Direction: {latest_direction}")
+            logging.info(f"Previous Direction: {previous_direction}")
 
             # Determine buy/sell signals
             if latest_direction == 1 and previous_direction == -1:
-                print(f"Buy signal detected at price {latest_price}.")
+                logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
 
             elif latest_direction == -1 and previous_direction == 1:
-                print(f"Sell signal detected at price {latest_price}.")
+                logging.info(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
             else:
-                print("No trade signal detected.")
+                logging.info("No trade signal detected.")
 
-            print("Sleeping for 5 minutes...\n")
+            logging.info("Sleeping for 5 minutes...\n")
             time.sleep(300)
 
         except Exception as e:
