@@ -1,0 +1,4 @@
+flask
+alpaca-trade-api
+pandas
+numpy
