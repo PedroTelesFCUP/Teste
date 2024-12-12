@@ -18,8 +18,8 @@ api = REST(API_KEY, SECRET_KEY, BASE_URL)
 # Parameters for SuperTrend
 ATR_LEN = 10
 FACTOR = 3
-SYMBOL = "TSLA"  # Tesla stock
-QUANTITY = 1000  # Number of shares to trade
+SYMBOL = "BTC/USD"  # Bitcoin trading pair
+QUANTITY = 0.01  # Quantity of Bitcoin to trade (adjust as needed for testing)
 
 # Configure Logging
 logging.basicConfig(
@@ -72,10 +72,10 @@ def supertrend(high, low, close, atr, factor):
 
 
 def fetch_market_data(symbol, limit=100):
-    """Fetch historical 5-minute market data from Alpaca."""
-    logging.info(f"Fetching 5-minute market data for {symbol}...")
+    """Fetch historical 1-minute market data from Alpaca."""
+    logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        bars = api.get_bars(symbol, "5Min", limit=limit).df
+        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df  # Fetch 1-minute data
         bars = bars.tz_convert("America/New_York")  # Convert to your timezone
         logging.info(f"Fetched {len(bars)} data points.")
         print("Market Data:\n", bars.tail())
@@ -88,7 +88,7 @@ def fetch_market_data(symbol, limit=100):
 
 def execute_trade(symbol, quantity, side):
     """Place a buy or sell order."""
-    logging.info(f"Executing {side} order for {quantity} shares of {symbol}...")
+    logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
             symbol=symbol,
@@ -133,8 +133,8 @@ def trading_bot():
             logging.info("Fetching market data...")
             data = fetch_market_data(SYMBOL, limit=ATR_LEN + 1)
             if data.empty:
-                logging.warning("No market data available. Retrying in 5 minutes...")
-                time.sleep(300)
+                logging.warning("No market data available. Retrying in 1 minute...")
+                time.sleep(60)
                 continue
 
             logging.info("Calculating SuperTrend...")
@@ -166,12 +166,12 @@ def trading_bot():
             else:
                 logging.info("No trade signal detected.")
 
-            logging.info("Sleeping for 5 minutes...\n")
-            time.sleep(300)
+            logging.info("Sleeping for 1 minute...\n")
+            time.sleep(60)
 
         except Exception as e:
             logging.error(f"Error in trading bot: {e}")
-            time.sleep(300)
+            time.sleep(60)
 
 
 # Flask Web Server for Uptime Monitoring
@@ -197,4 +197,5 @@ if __name__ == "__main__":
 
     # Start the trading bot
     trading_bot()
+
 
