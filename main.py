@@ -89,7 +89,7 @@ def supertrend(high, low, close, atr, factor):
 def fetch_market_data(symbol, limit=100):
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
+        bars = api.get_crypto_bars(symbol.replace("/", ""), "1Min", limit=limit).df
         if bars.empty:
             logging.warning("No market data returned!")
             return pd.DataFrame()
@@ -103,7 +103,7 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
-            symbol=symbol,
+            symbol=symbol.replace("/", ""),
             qty=quantity,
             side=side,
             type="market",
@@ -122,7 +122,7 @@ async def start_stream():
         return
     while True:
         try:
-            await stream.subscribe_crypto_trades(on_trade, SYMBOL)
+            await stream.subscribe_crypto_trades(on_trade, SYMBOL.replace("/", ""))
             await stream.run()
         except Exception as e:
             logging.error(f"WebSocket disconnected: {e}")
