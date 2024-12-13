@@ -3,7 +3,6 @@ import time
 import numpy as np
 import pandas as pd
 import logging
-import requests
 from flask import Flask
 from threading import Thread
 from binance.client import Client
@@ -100,44 +99,6 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     supertrend = lower_band[-1] if direction == 1 else upper_band[-1]
     return supertrend, direction
 
-# Calculate volatility thresholds
-def calculate_percentile_thresholds(atr_values):
-    low_threshold = np.percentile(atr_values, 25)
-    medium_threshold = np.percentile(atr_values, 50)
-    high_threshold = np.percentile(atr_values, 75)
-    return low_threshold, medium_threshold, high_threshold
-
-# Classify volatility
-def classify_volatility_with_percentiles(atr, low_threshold, medium_threshold, high_threshold):
-    if atr <= low_threshold:
-        return "low"
-    elif atr <= medium_threshold:
-        return "medium"
-    else:
-        return "high"
-
-# Adjust ATR factor based on volatility
-def adjust_atr_factor_with_percentiles(volatility_level):
-    if volatility_level == "low":
-        return 2.0
-    elif volatility_level == "high":
-        return 4.0
-    else:
-        return 3.0
-
-# Update volatility thresholds and ATR_FACTOR
-def update_volatility_and_factor():
-    global atr_values, ATR_FACTOR
-    if len(atr_values) < volatility_window:
-        logging.info("Not enough data for percentiles. Skipping update.")
-        return
-
-    low_threshold, medium_threshold, high_threshold = calculate_percentile_thresholds(atr_values)
-    current_atr = atr_values[-1]
-    volatility_level = classify_volatility_with_percentiles(current_atr, low_threshold, medium_threshold, high_threshold)
-    ATR_FACTOR = adjust_atr_factor_with_percentiles(volatility_level)
-    logging.info(f"Volatility Level: {volatility_level}, Adjusted ATR_FACTOR: {ATR_FACTOR}")
-
 # Execute a trade
 def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
@@ -152,8 +113,10 @@ def trading_bot():
 
     while True:
         try:
+            logging.info("Fetching real-time BTC/USD price...")
             latest_price = fetch_realtime_price()
             if latest_price is None:
+                logging.warning("Failed to fetch price. Retrying...")
                 time.sleep(60)
                 continue
 
@@ -165,16 +128,24 @@ def trading_bot():
 
             high, low, close = fetch_historical_data()
             if high is None or low is None or close is None:
+                logging.error("Historical data is missing. Skipping this cycle.")
+                time.sleep(60)
+                continue
+
+            if high.isnull().any() or low.isnull().any() or close.isnull().any():
+                logging.error("Historical data contains NaN values. Skipping this cycle.")
                 time.sleep(60)
                 continue
 
             atr = calculate_atr(high, low, close)
+            if atr is None or np.isnan(atr):
+                logging.error("ATR value is None or NaN. Skipping this cycle.")
+                time.sleep(60)
+                continue
+
             atr_values.append(atr)
             if len(atr_values) > volatility_window:
                 atr_values.pop(0)
-
-            if len(atr_values) >= volatility_window and (len(atr_values) % 10 == 0):
-                update_volatility_and_factor()
 
             supertrend_value, direction = calculate_supertrend(
                 high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
@@ -208,4 +179,5 @@ if __name__ == "__main__":
     thread.start()
 
     trading_bot()
+
 
