@@ -8,6 +8,14 @@ from alpaca_trade_api.rest import REST
 from flask import Flask
 from threading import Thread
 import sys  # Add sys for logging to stdout
+from binance.client import Client
+
+# Binance API Credentials (read from environment variables)
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
+BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY")
+
+# Initialize Binance Client
+binance_client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 
 # Alpaca API Credentials (read from environment variables)
 API_KEY = os.getenv("ALPACA_API_KEY")
@@ -25,6 +33,7 @@ api = REST(API_KEY, SECRET_KEY, BASE_URL)
 ATR_LEN = 10
 FACTOR = 3
 SYMBOL = "BTC/USD"  # Correct cryptocurrency symbol format
+BINANCE_SYMBOL = "BTCUSDT"  # Binance uses a different symbol format
 QUANTITY = round(0.001, 8)  # Adjust for fractional trading with required precision
 
 # Configure Logging
@@ -48,41 +57,33 @@ last_signal = None
 initialized = False
 accumulated_quantity = 0.0
 
-# Fetch real-time BTC/USD price using CoinGecko
+# Fetch real-time BTC/USD price using Binance
 def fetch_realtime_price():
-    url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raise HTTPError for bad responses
-        data = response.json()
-        price = data["bitcoin"]["usd"]
+        ticker = binance_client.get_symbol_ticker(symbol=BINANCE_SYMBOL)
+        price = float(ticker["price"])
         logging.info(f"Real-time BTC/USD price: {price}")
         return price
     except Exception as e:
-        logging.error(f"Error fetching real-time price: {e}")
+        logging.error(f"Error fetching real-time price from Binance: {e}")
         return None
 
-# Fetch historical market data using CoinGecko
-def fetch_historical_data(symbol="bitcoin", vs_currency="usd", days=1):
+# Fetch historical market data using Binance
+def fetch_historical_data(symbol=BINANCE_SYMBOL, interval="1m", limit=ATR_LEN):
     """
-    Fetch historical market data for the last `days` using CoinGecko.
+    Fetch historical market data using Binance.
     Returns a DataFrame with high, low, and close prices.
     """
-    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart"
-    params = {"vs_currency": vs_currency, "days": days, "interval": "minute"}
     try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-
-        # Extract and process historical data
-        prices = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
-        prices["timestamp"] = pd.to_datetime(prices["timestamp"], unit="ms")
-        prices["high"] = prices["close"]  # CoinGecko does not provide separate high/low
-        prices["low"] = prices["close"]  # Using close as a proxy for high/low
-        return prices[["high", "low", "close"]]
+        klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        prices = pd.DataFrame(klines, columns=[
+            "open_time", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume",
+            "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
+        ])
+        prices = prices[["high", "low", "close"]].astype(float)
+        return prices
     except Exception as e:
-        logging.error(f"Error fetching historical data: {e}")
+        logging.error(f"Error fetching historical data from Binance: {e}")
         return pd.DataFrame()
 
 # Calculate Average True Range (ATR)
@@ -209,6 +210,5 @@ if __name__ == "__main__":
 
     # Start the trading bot in the main thread
     trading_bot()
-
 
 
