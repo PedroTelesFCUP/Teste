@@ -59,6 +59,13 @@ def fetch_realtime_price():
         logging.error(f"Error fetching real-time price: {e}")
         return None
 
+# Calculate SuperTrend
+def calculate_supertrend(latest_price):
+    """Mock SuperTrend calculation for demonstration purposes."""
+    supertrend_value = latest_price * 0.995  # Example calculation
+    direction = 1 if latest_price > supertrend_value else -1
+    return supertrend_value, direction
+
 # Execute a trade on Alpaca
 def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
@@ -97,14 +104,17 @@ def trading_bot():
             # Update last processed price
             last_price = latest_price
 
-            logging.info(f"Real-time price: {latest_price}")
+            # Calculate SuperTrend
+            supertrend_value, direction = calculate_supertrend(latest_price)
+            logging.info(f"Latest Price: {latest_price}")
+            logging.info(f"SuperTrend Value: {supertrend_value}")
+            logging.info(f"Current Direction: {direction}")
 
             # Example trading logic (update with your conditions)
-            # For instance, you can compare with a moving average or predefined thresholds
-            if latest_price > 50000:  # Replace with your buy condition
+            if direction == 1:  # Replace with your buy condition
                 logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
-            elif latest_price < 40000:  # Replace with your sell condition
+            elif direction == -1:  # Replace with your sell condition
                 logging.info(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
 
