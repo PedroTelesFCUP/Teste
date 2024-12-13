@@ -8,6 +8,7 @@ from alpaca_trade_api.stream import Stream
 from flask import Flask
 from threading import Thread
 import asyncio
+import sys  # Add sys for logging to stdout
 
 # Alpaca API Credentials (read from environment variables)
 API_KEY = os.getenv("ALPACA_API_KEY")
@@ -15,7 +16,8 @@ SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"  # Paper trading endpoint
 
 if not API_KEY or not SECRET_KEY:
-    raise ValueError("Missing Alpaca API credentials! Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are set.")
+    logging.error("Missing Alpaca API credentials! Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are set.")
+    raise ValueError("Missing Alpaca API credentials!")
 
 # Initialize Alpaca REST API and WebSocket Stream
 api = REST(API_KEY, SECRET_KEY, BASE_URL)
@@ -25,7 +27,7 @@ stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL)
 ATR_LEN = 10
 FACTOR = 3
 SYMBOL = "BTC/USD"  # Cryptocurrency symbol
-QUANTITY = 0.001  # Adjust for fractional trading
+QUANTITY = round(0.001, 8)  # Adjust for fractional trading with required precision
 
 # Configure Logging
 logging.basicConfig(
@@ -80,7 +82,10 @@ def supertrend(high, low, close, atr, factor):
 def fetch_market_data(symbol, limit=100):
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
+        bars = api.get_crypto_bars(symbol.replace("/", ""), "1Min", limit=limit).df
+        if bars.empty:
+            logging.warning("No market data returned!")
+            return pd.DataFrame()
         bars = bars.tz_convert("America/New_York")
         return bars
     except Exception as e:
@@ -91,7 +96,7 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
-            symbol=symbol,
+            symbol=symbol.replace("/", ""),
             qty=quantity,
             side=side,
             type="market",
@@ -103,6 +108,15 @@ def execute_trade(symbol, quantity, side):
 
 async def on_trade(trade):
     logging.info(f"Trade Data: {trade}")
+
+async def start_stream():
+    while True:
+        try:
+            await stream.subscribe_crypto_trades(on_trade, SYMBOL.replace("/", ""))
+            await stream.run()
+        except Exception as e:
+            logging.error(f"WebSocket disconnected: {e}")
+            await asyncio.sleep(5)  # Reconnect after a delay
 
 def trading_bot():
     logging.info("Trading bot started.")
@@ -164,6 +178,4 @@ if __name__ == "__main__":
     thread2.start()
 
     # Run WebSocket asynchronously
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(stream.subscribe_crypto_trades(on_trade, SYMBOL))
-    loop.run_until_complete(stream.run())
+    asyncio.run(start_stream())
