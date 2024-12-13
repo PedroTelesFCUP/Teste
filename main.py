@@ -21,7 +21,11 @@ if not API_KEY or not SECRET_KEY:
 
 # Initialize Alpaca REST API and WebSocket Stream
 api = REST(API_KEY, SECRET_KEY, BASE_URL)
-stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL)
+try:
+    stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL)
+except Exception as e:
+    logging.error(f"Failed to initialize WebSocket stream: {e}")
+    stream = None
 
 # Parameters for SuperTrend
 ATR_LEN = 10
@@ -85,7 +89,7 @@ def supertrend(high, low, close, atr, factor):
 def fetch_market_data(symbol, limit=100):
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        bars = api.get_crypto_bars(symbol.replace("/", "-"), "1Min", limit=limit).df
+        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
         if bars.empty:
             logging.warning("No market data returned!")
             return pd.DataFrame()
@@ -99,7 +103,7 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
-            symbol=symbol.replace("/", "-"),
+            symbol=symbol,
             qty=quantity,
             side=side,
             type="market",
@@ -113,9 +117,12 @@ async def on_trade(trade):
     logging.info(f"Trade Data: {trade}")
 
 async def start_stream():
+    if not stream:
+        logging.error("WebSocket stream is not initialized. Exiting WebSocket task.")
+        return
     while True:
         try:
-            await stream.subscribe_crypto_trades(on_trade, SYMBOL.replace("/", "-"))
+            await stream.subscribe_crypto_trades(on_trade, SYMBOL)
             await stream.run()
         except Exception as e:
             logging.error(f"WebSocket disconnected: {e}")
@@ -192,3 +199,4 @@ if __name__ == "__main__":
 
     # Run WebSocket asynchronously
     asyncio.run(start_stream())
+
