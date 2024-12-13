@@ -127,19 +127,20 @@ def trading_bot():
             logging.info(f"SuperTrend Value: {supertrend_value}")
             logging.info(f"Current Direction: {direction}")
 
-            # Execute trades only on valid direction changes
-            if direction == 1 and last_signal == "sell":  # First valid buy
+            # Only execute trades on valid direction changes
+            if last_signal == "sell" and direction == 1:  # Transition from sell to buy
                 logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
                 last_signal = "buy"
-            elif direction == -1 and last_signal == "buy":  # First valid sell
+            elif last_signal == "buy" and direction == -1:  # Transition from buy to sell
                 logging.info(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, accumulated_quantity, "sell")  # Sell all accumulated quantity
                 last_signal = "sell"
-            elif last_signal is None and direction == 1:  # First trade (buy)
-                logging.info(f"Initial buy detected at price {latest_price}.")
-                execute_trade(SYMBOL, QUANTITY, "buy")
-                last_signal = "buy"
+
+            # Initialize the first signal but do not trade
+            if last_signal is None:
+                last_signal = "buy" if direction == 1 else "sell"
+                logging.info(f"Initial signal set to {last_signal}. Waiting for the first valid signal change.")
 
             time.sleep(60)  # Poll every minute
 
