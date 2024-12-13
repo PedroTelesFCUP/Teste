@@ -3,6 +3,7 @@ import time
 import numpy as np
 import pandas as pd
 import logging
+import requests
 from alpaca_trade_api.rest import REST
 from flask import Flask
 from threading import Thread
@@ -44,60 +45,26 @@ def home():
 # Global variable to track the last processed price
 last_price = None
 
-# Functions for Trading Logic
-def calculate_atr(high, low, close, period):
-    tr1 = high - low
-    tr2 = np.abs(high - close.shift(1))
-    tr3 = np.abs(low - close.shift(1))
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(window=period).mean()
-    return atr
-
-def supertrend(high, low, close, atr, factor):
-    hl2 = (high + low) / 2
-    upper_band = hl2 + factor * atr
-    lower_band = hl2 - factor * atr
-
-    supertrend = pd.Series(index=close.index, dtype="float64")
-    direction = pd.Series(index=close.index, dtype="int")
-
-    for i in range(len(close)):
-        if i == 0:
-            continue
-        prev_upper_band = upper_band.iloc[i - 1]
-        prev_lower_band = lower_band.iloc[i - 1]
-
-        lower_band.iloc[i] = max(lower_band.iloc[i], prev_lower_band if close.iloc[i - 1] >= prev_lower_band else lower_band.iloc[i])
-        upper_band.iloc[i] = min(upper_band.iloc[i], prev_upper_band if close.iloc[i - 1] <= prev_upper_band else upper_band.iloc[i])
-
-        if supertrend.iloc[i - 1] == prev_upper_band:
-            direction.iloc[i] = -1 if close.iloc[i] < upper_band.iloc[i] else 1
-        else:
-            direction.iloc[i] = 1 if close.iloc[i] > lower_band.iloc[i] else -1
-
-        supertrend.iloc[i] = lower_band.iloc[i] if direction.iloc[i] == 1 else upper_band.iloc[i]
-
-    return supertrend, direction
-
-def fetch_market_data(symbol, limit=100):
-    logging.info(f"Fetching 1-minute market data for {symbol}...")
+# Fetch real-time BTC/USD price using CoinGecko
+def fetch_realtime_price():
+    url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
     try:
-        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
-        if bars.empty:
-            logging.warning("No market data returned!")
-            return pd.DataFrame()
-        bars = bars.tz_convert("America/New_York")
-        logging.info(f"Fetched {len(bars)} bars for {symbol}")
-        return bars
+        response = requests.get(url)
+        response.raise_for_status()  # Raise HTTPError for bad responses
+        data = response.json()
+        price = data["bitcoin"]["usd"]
+        logging.info(f"Real-time BTC/USD price: {price}")
+        return price
     except Exception as e:
-        logging.error(f"Error fetching market data: {e}")
-        return pd.DataFrame()
+        logging.error(f"Error fetching real-time price: {e}")
+        return None
 
+# Execute a trade on Alpaca
 def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
-            symbol=symbol,
+            symbol=symbol.replace("/", ""),
             qty=quantity,
             side=side,
             type="market",
@@ -107,64 +74,52 @@ def execute_trade(symbol, quantity, side):
     except Exception as e:
         logging.error(f"Failed to execute {side} order: {e}")
 
+# Main trading bot logic
 def trading_bot():
-    global last_price  # Use the global variable to store the last price
+    global last_price
     logging.info("Trading bot started.")
     while True:
         try:
-            logging.info("Fetching market data...")
-            data = fetch_market_data(SYMBOL, limit=ATR_LEN + 1)
+            logging.info("Fetching real-time BTC/USD price...")
+            latest_price = fetch_realtime_price()
 
-            if data.empty:
-                logging.warning("No market data available.")
+            if latest_price is None:
+                logging.warning("Failed to fetch real-time price. Retrying...")
                 time.sleep(60)
                 continue
 
-            # Check if the latest price is different from the last processed price
-            latest_price = data["close"].iloc[-1]
+            # Skip processing if price hasn't changed
             if last_price == latest_price:
-                logging.info("No new price updates. Skipping this cycle.")
+                logging.info("No price change. Skipping this cycle.")
                 time.sleep(60)
                 continue
 
-            # Update the last processed price
+            # Update last processed price
             last_price = latest_price
 
-            logging.info("Calculating SuperTrend...")
-            data["atr"] = calculate_atr(data["high"], data["low"], data["close"], ATR_LEN)
-            data["supertrend"], data["direction"] = supertrend(
-                data["high"], data["low"], data["close"], data["atr"], FACTOR
-            )
+            logging.info(f"Real-time price: {latest_price}")
 
-            # Log current SuperTrend values
-            latest_supertrend = data["supertrend"].iloc[-1]
-            latest_direction = data["direction"].iloc[-1]
-            previous_direction = data["direction"].iloc[-2]
-
-            logging.info(f"Latest Price: {latest_price}")
-            logging.info(f"Latest SuperTrend Value: {latest_supertrend}")
-            logging.info(f"Current Direction: {latest_direction}, Previous Direction: {previous_direction}")
-
-            # Determine buy/sell signals
-            if latest_direction == 1 and previous_direction == -1:
+            # Example trading logic (update with your conditions)
+            # For instance, you can compare with a moving average or predefined thresholds
+            if latest_price > 50000:  # Replace with your buy condition
                 logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
-
-            elif latest_direction == -1 and previous_direction == 1:
+            elif latest_price < 40000:  # Replace with your sell condition
                 logging.info(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
 
-            time.sleep(60)
+            time.sleep(60)  # Poll every minute
 
         except Exception as e:
             logging.error(f"Error in trading bot: {e}")
             time.sleep(60)
 
+# Run Flask Web Server
 def run_web_server():
     PORT = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=PORT)
 
-# Run Flask Web Server and Trading Bot
+# Start the bot
 if __name__ == "__main__":
     # Start the web server in a separate thread
     thread1 = Thread(target=run_web_server)
@@ -173,4 +128,5 @@ if __name__ == "__main__":
 
     # Start the trading bot in the main thread
     trading_bot()
+
 
