@@ -5,24 +5,29 @@ import pandas as pd
 import logging
 from alpaca_trade_api.rest import REST
 from alpaca_trade_api.stream import Stream
+from alpaca_trade_api.common import URL
 from flask import Flask
 from threading import Thread
 import asyncio
-import sys  # Add sys for logging to stdout
+import sys
 
-# Alpaca API Credentials (read from environment variables)
+# Alpaca API Credentials
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL = "https://paper-api.alpaca.markets"  # Paper trading endpoint
+BASE_URL = "https://paper-api.alpaca.markets"  # Trading API endpoint
+DATA_URL = "wss://stream.data.alpaca.markets/v1beta3/crypto/us"  # WebSocket endpoint for crypto
 
 if not API_KEY or not SECRET_KEY:
     logging.error("Missing Alpaca API credentials! Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are set.")
     raise ValueError("Missing Alpaca API credentials!")
 
-# Initialize Alpaca REST API and WebSocket Stream
+# Initialize Alpaca REST API
 api = REST(API_KEY, SECRET_KEY, BASE_URL)
+
+# Initialize WebSocket Stream
 try:
-    stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL)
+    stream = Stream(API_KEY, SECRET_KEY, base_url=URL(BASE_URL), data_url=URL(DATA_URL))
+    logging.info("WebSocket stream initialized successfully.")
 except Exception as e:
     logging.error(f"Failed to initialize WebSocket stream: {e}")
     stream = None
@@ -30,13 +35,13 @@ except Exception as e:
 # Parameters for SuperTrend
 ATR_LEN = 10
 FACTOR = 3
-SYMBOL = "BTC/USD"  # Correct cryptocurrency symbol format
-QUANTITY = round(0.001, 8)  # Adjust for fractional trading with required precision
+SYMBOL = "BTC/USD"
+QUANTITY = round(0.001, 8)
 
 # Configure Logging
 logging.basicConfig(
-    stream=sys.stdout,  # Ensure logs are visible in Render's dashboard
-    level=logging.DEBUG,  # Set to DEBUG for detailed logs
+    stream=sys.stdout,
+    level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logging.info("Trading bot initialized.")
@@ -86,34 +91,6 @@ def supertrend(high, low, close, atr, factor):
 
     return supertrend, direction
 
-def fetch_market_data(symbol, limit=100):
-    logging.info(f"Fetching 1-minute market data for {symbol}...")
-    try:
-        bars = api.get_crypto_bars(symbol.replace("/", ""), "1Min", limit=limit).df
-        if bars.empty:
-            logging.warning("No market data returned!")
-            return pd.DataFrame()
-        bars = bars.tz_convert("America/New_York")
-        logging.info(f"Fetched {len(bars)} bars for {symbol}")
-        return bars
-    except Exception as e:
-        logging.error(f"Error fetching market data: {e}")
-        return pd.DataFrame()
-
-def execute_trade(symbol, quantity, side):
-    logging.info(f"Executing {side} order for {quantity} of {symbol}...")
-    try:
-        order = api.submit_order(
-            symbol=symbol.replace("/", ""),
-            qty=quantity,
-            side=side,
-            type="market",
-            time_in_force="gtc"
-        )
-        logging.info(f"{side.capitalize()} order submitted successfully.")
-    except Exception as e:
-        logging.error(f"Failed to execute {side} order: {e}")
-
 async def on_trade(trade):
     logging.info(f"Trade Data: {trade}")
 
@@ -121,66 +98,14 @@ async def start_stream():
     if not stream:
         logging.error("WebSocket stream is not initialized. Exiting WebSocket task.")
         return
+
     while True:
         try:
-            await stream.subscribe_crypto_trades(on_trade, SYMBOL.replace("/", ""))
+            await stream.subscribe_crypto_trades(on_trade, SYMBOL)
             await stream.run()
         except Exception as e:
             logging.error(f"WebSocket disconnected: {e}")
             await asyncio.sleep(5)  # Reconnect after a delay
-
-def trading_bot():
-    global last_price  # Use the global variable to store the last price
-    logging.info("Trading bot started.")
-    while True:
-        try:
-            logging.info("Fetching market data...")
-            data = fetch_market_data(SYMBOL, limit=ATR_LEN + 1)
-
-            if data.empty:
-                logging.warning("No market data available.")
-                time.sleep(60)
-                continue
-
-            # Check if the latest price is different from the last processed price
-            latest_price = data["close"].iloc[-1]
-            if last_price == latest_price:
-                logging.info("No new price updates. Skipping this cycle.")
-                time.sleep(60)
-                continue
-
-            # Update the last processed price
-            last_price = latest_price
-
-            logging.info("Calculating SuperTrend...")
-            data["atr"] = calculate_atr(data["high"], data["low"], data["close"], ATR_LEN)
-            data["supertrend"], data["direction"] = supertrend(
-                data["high"], data["low"], data["close"], data["atr"], FACTOR
-            )
-
-            # Log current SuperTrend values
-            latest_supertrend = data["supertrend"].iloc[-1]
-            latest_direction = data["direction"].iloc[-1]
-            previous_direction = data["direction"].iloc[-2]
-
-            logging.info(f"Latest Price: {latest_price}")
-            logging.info(f"Latest SuperTrend Value: {latest_supertrend}")
-            logging.info(f"Current Direction: {latest_direction}, Previous Direction: {previous_direction}")
-
-            # Determine buy/sell signals
-            if latest_direction == 1 and previous_direction == -1:
-                logging.info(f"Buy signal detected at price {latest_price}.")
-                execute_trade(SYMBOL, QUANTITY, "buy")
-
-            elif latest_direction == -1 and previous_direction == 1:
-                logging.info(f"Sell signal detected at price {latest_price}.")
-                execute_trade(SYMBOL, QUANTITY, "sell")
-
-            time.sleep(60)
-
-        except Exception as e:
-            logging.error(f"Error in trading bot: {e}")
-            time.sleep(60)
 
 def run_web_server():
     PORT = int(os.environ.get("PORT", 8080))
@@ -193,12 +118,8 @@ if __name__ == "__main__":
     thread1.daemon = True
     thread1.start()
 
-    # Start the trading bot in a separate thread
-    thread2 = Thread(target=trading_bot)
-    thread2.daemon = True
-    thread2.start()
-
     # Run WebSocket asynchronously
     asyncio.run(start_stream())
+
 
 
