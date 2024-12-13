@@ -105,7 +105,7 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
         direction = 1 if close.iloc[-1] < lower_band[-1] else -1
 
     supertrend = lower_band[-1] if direction == 1 else upper_band[-1]
-    return supertrend, direction
+    return supertrend, direction, upper_band[-1], lower_band[-1]
 
 # Execute a trade
 def execute_trade(symbol, quantity, side):
@@ -135,11 +135,6 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
-            if high.isnull().any() or low.isnull().any() or close.isnull().any():
-                logging.error("Historical data contains NaN values. Skipping this cycle.")
-                time.sleep(60)
-                continue
-
             logging.info("Calculating ATR...")
             atr = calculate_atr(high, low, close)
             if atr is None or np.isnan(atr):
@@ -153,23 +148,40 @@ def trading_bot():
                 atr_values.pop(0)
 
             logging.info("Calculating SuperTrend...")
-            supertrend_value, direction = calculate_supertrend(
+            supertrend_value, direction, upper_band, lower_band = calculate_supertrend(
                 high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
             )
             logging.info(f"SuperTrend Value: {supertrend_value}")
+            logging.info(f"Upper Band: {upper_band}, Lower Band: {lower_band}")
             logging.info(f"Current Direction: {direction}")
+            logging.info(f"Real-time BTC/USD price: {latest_price}")
 
+            # Initialize the first signal and wait for a change
+            if not initialized:
+                initialized = True
+                last_signal = "buy" if direction == 1 else "sell"
+                logging.info(f"Initialization complete. First signal set to: {last_signal}")
+                prev_upper_band = supertrend_value if direction == -1 else prev_upper_band
+                prev_lower_band = supertrend_value if direction == 1 else prev_lower_band
+                prev_supertrend = supertrend_value
+                time.sleep(60)
+                continue
+
+            # Execute trades on valid signal change
             if last_signal == "sell" and direction == 1:
-                logging.info(f"Buy signal detected. Executing buy trade.")
+                logging.info("Buy signal triggered. Executing buy trade.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
                 last_signal = "buy"
             elif last_signal == "buy" and direction == -1:
-                logging.info(f"Sell signal detected. Executing sell trade.")
+                logging.info("Sell signal triggered. Executing sell trade.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
                 last_signal = "sell"
+            else:
+                logging.info(f"No valid signal change detected. Last signal: {last_signal}, Current direction: {direction}")
 
-            prev_upper_band = supertrend_value if direction == -1 else prev_upper_band
-            prev_lower_band = supertrend_value if direction == 1 else prev_lower_band
+            # Update previous bands and SuperTrend
+            prev_upper_band = upper_band
+            prev_lower_band = lower_band
             prev_supertrend = supertrend_value
 
             time.sleep(60)
@@ -185,6 +197,5 @@ if __name__ == "__main__":
     thread.start()
 
     trading_bot()
-
 
 
