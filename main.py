@@ -9,6 +9,7 @@ from flask import Flask
 from threading import Thread
 import sys  # Add sys for logging to stdout
 from binance.client import Client
+from sklearn.cluster import KMeans  # For k-means clustering
 
 # Binance API Credentials (read from environment variables)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
@@ -31,7 +32,7 @@ api = REST(API_KEY, SECRET_KEY, BASE_URL)
 
 # Parameters for SuperTrend
 ATR_LEN = 10
-FACTOR = 3
+TRAINING_DATA_PERIOD = 100
 SYMBOL = "BTC/USD"  # Correct cryptocurrency symbol format
 BINANCE_SYMBOL = "BTCUSDT"  # Binance uses a different symbol format
 QUANTITY = round(0.001, 8)  # Adjust for fractional trading with required precision
@@ -69,7 +70,7 @@ def fetch_realtime_price():
         return None
 
 # Fetch historical market data using Binance
-def fetch_historical_data(symbol=BINANCE_SYMBOL, interval="1m", limit=ATR_LEN):
+def fetch_historical_data(symbol=BINANCE_SYMBOL, interval="1m", limit=TRAINING_DATA_PERIOD):
     """
     Fetch historical market data using Binance.
     Returns a DataFrame with high, low, and close prices.
@@ -99,10 +100,35 @@ def calculate_atr(prices, period=ATR_LEN):
     atr = tr.rolling(window=period).mean()
     return atr.iloc[-1]  # Return the latest ATR value
 
+# Perform k-means clustering to classify volatility levels
+def classify_volatility(prices):
+    """Classify volatility into high, medium, and low clusters using k-means."""
+    try:
+        atr_values = prices["close"].rolling(window=ATR_LEN).std().dropna().values.reshape(-1, 1)
+        kmeans = KMeans(n_clusters=3, random_state=42)
+        kmeans.fit(atr_values)
+
+        # Assign cluster centroids to volatility levels
+        centroids = kmeans.cluster_centers_.flatten()
+        centroids.sort()  # Ensure low, medium, and high order
+        low, medium, high = centroids
+
+        # Determine current volatility cluster
+        current_atr = atr_values[-1][0]
+        if current_atr <= low:
+            return low, "low"
+        elif low < current_atr <= medium:
+            return medium, "medium"
+        else:
+            return high, "high"
+    except Exception as e:
+        logging.error(f"Error in k-means clustering: {e}")
+        return 3.0, "medium"  # Default factor
+
 # Calculate SuperTrend
-def calculate_supertrend(latest_price):
-    """Mock SuperTrend calculation for demonstration purposes."""
-    supertrend_value = latest_price * 0.995  # Example calculation
+def calculate_supertrend(latest_price, atr_factor):
+    """Calculate the SuperTrend value dynamically based on ATR factor."""
+    supertrend_value = latest_price - (latest_price * atr_factor / 100)
     direction = 1 if latest_price > supertrend_value else -1
     return supertrend_value, direction
 
@@ -165,12 +191,12 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
-            # Calculate ATR
-            atr = calculate_atr(historical_prices)
-            logging.info(f"Calculated ATR: {atr}")
+            # Classify volatility and calculate dynamic ATR factor
+            atr_factor, volatility_level = classify_volatility(historical_prices)
+            logging.info(f"Classified volatility as {volatility_level} with ATR factor: {atr_factor}")
 
             # Calculate SuperTrend
-            supertrend_value, direction = calculate_supertrend(latest_price)
+            supertrend_value, direction = calculate_supertrend(latest_price, atr_factor)
             logging.info(f"Latest Price: {latest_price}")
             logging.info(f"SuperTrend Value: {supertrend_value}")
             logging.info(f"Current Direction: {direction}")
@@ -182,16 +208,10 @@ def trading_bot():
                 last_signal = "buy"
             elif last_signal == "buy" and direction == -1:  # Transition from buy to sell
                 logging.info(f"Sell signal detected at price {latest_price}.")
-                execute_trade(SYMBOL, accumulated_quantity, "sell")  # Sell all accumulated quantity
+                execute_trade(SYMBOL, accumulated_quantity, "sell")
                 last_signal = "sell"
 
-            # Initialize the first signal but do not trade
-            if last_signal is None:
-                last_signal = "buy" if direction == 1 else "sell"
-                logging.info(f"Initial signal set to {last_signal}. Waiting for the first valid signal change.")
-
             time.sleep(60)  # Poll every minute
-
         except Exception as e:
             logging.error(f"Error in trading bot: {e}")
             time.sleep(60)
@@ -210,5 +230,4 @@ if __name__ == "__main__":
 
     # Start the trading bot in the main thread
     trading_bot()
-
 
