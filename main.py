@@ -103,11 +103,20 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
+    # Ensure previous bands are scalar values
+    prev_upper_band = prev_upper_band if isinstance(prev_upper_band, (float, int)) else prev_upper_band.iloc[-1]
+    prev_lower_band = prev_lower_band if isinstance(prev_lower_band, (float, int)) else prev_lower_band.iloc[-1]
+    prev_supertrend = prev_supertrend if isinstance(prev_supertrend, (float, int)) else prev_supertrend.iloc[-1]
+
     # Band adjustment logic
-    lower_band = np.where((lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
-                          lower_band, prev_lower_band)
-    upper_band = np.where((upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
-                          upper_band, prev_upper_band)
+    lower_band = np.where(
+        (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
+        lower_band, prev_lower_band
+    )
+    upper_band = np.where(
+        (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
+        upper_band, prev_upper_band
+    )
 
     # Direction and SuperTrend value
     if prev_supertrend == prev_upper_band:
@@ -118,6 +127,7 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     supertrend = lower_band[-1] if direction == 1 else upper_band[-1]
 
     return supertrend, direction
+
 
 # Execute a trade on Alpaca
 def execute_trade(symbol, quantity, side):
