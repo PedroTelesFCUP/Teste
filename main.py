@@ -42,8 +42,11 @@ app = Flask(__name__)
 def home():
     return "Bot is running!", 200
 
-# Global variable to track the last processed price
+# Global variables to track the last processed price, signal, and total quantity
 last_price = None
+last_signal = None
+initialized = False
+accumulated_quantity = 0.0
 
 # Fetch real-time BTC/USD price using CoinGecko
 def fetch_realtime_price():
@@ -68,6 +71,7 @@ def calculate_supertrend(latest_price):
 
 # Execute a trade on Alpaca
 def execute_trade(symbol, quantity, side):
+    global accumulated_quantity
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
@@ -78,12 +82,18 @@ def execute_trade(symbol, quantity, side):
             time_in_force="gtc"
         )
         logging.info(f"{side.capitalize()} order submitted successfully.")
+
+        # Update accumulated quantity
+        if side == "buy":
+            accumulated_quantity += quantity
+        elif side == "sell":
+            accumulated_quantity = 0.0  # Reset after selling all
     except Exception as e:
         logging.error(f"Failed to execute {side} order: {e}")
 
 # Main trading bot logic
 def trading_bot():
-    global last_price
+    global last_price, last_signal, initialized, accumulated_quantity
     logging.info("Trading bot started.")
     while True:
         try:
@@ -104,19 +114,32 @@ def trading_bot():
             # Update last processed price
             last_price = latest_price
 
+            # Skip the first iteration to avoid immediate trading
+            if not initialized:
+                initialized = True
+                logging.info("Initialization complete. Waiting for the first valid signal change.")
+                time.sleep(60)
+                continue
+
             # Calculate SuperTrend
             supertrend_value, direction = calculate_supertrend(latest_price)
             logging.info(f"Latest Price: {latest_price}")
             logging.info(f"SuperTrend Value: {supertrend_value}")
             logging.info(f"Current Direction: {direction}")
 
-            # Example trading logic (update with your conditions)
-            if direction == 1:  # Replace with your buy condition
+            # Execute trades only on valid direction changes
+            if direction == 1 and last_signal == "sell":  # First valid buy
                 logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
-            elif direction == -1:  # Replace with your sell condition
+                last_signal = "buy"
+            elif direction == -1 and last_signal == "buy":  # First valid sell
                 logging.info(f"Sell signal detected at price {latest_price}.")
-                execute_trade(SYMBOL, QUANTITY, "sell")
+                execute_trade(SYMBOL, accumulated_quantity, "sell")  # Sell all accumulated quantity
+                last_signal = "sell"
+            elif last_signal is None and direction == 1:  # First trade (buy)
+                logging.info(f"Initial buy detected at price {latest_price}.")
+                execute_trade(SYMBOL, QUANTITY, "buy")
+                last_signal = "buy"
 
             time.sleep(60)  # Poll every minute
 
