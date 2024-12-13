@@ -184,6 +184,15 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
+            # Skip if previous bands are not initialized
+            if prev_upper_band is None or prev_lower_band is None or prev_supertrend is None:
+                logging.info("Initializing previous bands and SuperTrend.")
+                atr = calculate_atr(high, low, close)
+                prev_upper_band = (high + low) / 2 + ATR_FACTOR * atr
+                prev_lower_band = (high + low) / 2 - ATR_FACTOR * atr
+                prev_supertrend = (prev_upper_band + prev_lower_band) / 2
+                continue
+
             # Calculate ATR and SuperTrend
             atr = calculate_atr(high, low, close)
             logging.info(f"Calculated ATR: {atr}")  # Log the ATR value
@@ -215,6 +224,7 @@ def trading_bot():
         except Exception as e:
             logging.error(f"Error in trading bot: {e}")
             time.sleep(60)
+
 
 # Run Flask Web Server
 def run_web_server():
