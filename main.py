@@ -169,11 +169,13 @@ def trading_bot():
                 continue
 
             # Calculate ATR and SuperTrend
-            atr = calculate_atr(high, low, close)
+	    atr = calculate_atr(high, low, close)
+            logging.info(f"Calculated ATR: {atr}")  # Log the ATR value
             supertrend_value, direction = calculate_supertrend(high, low, close, atr)
             logging.info(f"Latest Price: {latest_price}")
             logging.info(f"SuperTrend Value: {supertrend_value}")
             logging.info(f"Current Direction: {direction}")
+            
 
             # Only execute trades on valid direction changes
             if last_signal == "sell" and direction == 1:  # Transition from sell to buy
