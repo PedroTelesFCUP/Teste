@@ -82,6 +82,14 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
+    # Validate previous bands
+    if prev_upper_band is None:
+        prev_upper_band = upper_band[-1]
+    if prev_lower_band is None:
+        prev_lower_band = lower_band[-1]
+    if prev_supertrend is None:
+        prev_supertrend = lower_band[-1] if close.iloc[-1] < hl2.iloc[-1] else upper_band[-1]
+
     lower_band = np.where(
         (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
         lower_band, prev_lower_band
@@ -117,12 +125,6 @@ def trading_bot():
             latest_price = fetch_realtime_price()
             if latest_price is None:
                 logging.warning("Failed to fetch price. Retrying...")
-                time.sleep(60)
-                continue
-
-            if not initialized:
-                initialized = True
-                logging.info("Initialization complete.")
                 time.sleep(60)
                 continue
 
@@ -179,5 +181,6 @@ if __name__ == "__main__":
     thread.start()
 
     trading_bot()
+
 
 
