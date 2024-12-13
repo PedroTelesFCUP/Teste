@@ -82,13 +82,13 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
-    # Validate previous bands
+    # Validate and set default for previous bands
     if prev_upper_band is None:
-        prev_upper_band = upper_band[-1]
+        prev_upper_band = upper_band.iloc[-1] if not upper_band.empty else hl2.iloc[-1]
     if prev_lower_band is None:
-        prev_lower_band = lower_band[-1]
+        prev_lower_band = lower_band.iloc[-1] if not lower_band.empty else hl2.iloc[-1]
     if prev_supertrend is None:
-        prev_supertrend = lower_band[-1] if close.iloc[-1] < hl2.iloc[-1] else upper_band[-1]
+        prev_supertrend = lower_band.iloc[-1] if close.iloc[-1] < hl2.iloc[-1] else upper_band.iloc[-1]
 
     lower_band = np.where(
         (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
@@ -111,7 +111,6 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
 def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
 
-# Main trading bot logic
 # Main trading bot logic
 def trading_bot():
     global last_price, last_signal, initialized, atr_values
@@ -161,11 +160,11 @@ def trading_bot():
             logging.info(f"Current Direction: {direction}")
 
             if last_signal == "sell" and direction == 1:
-                logging.info(f"Buy signal detected at price {latest_price}.")
+                logging.info(f"Buy signal detected. Executing buy trade.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
                 last_signal = "buy"
             elif last_signal == "buy" and direction == -1:
-                logging.info(f"Sell signal detected at price {latest_price}.")
+                logging.info(f"Sell signal detected. Executing sell trade.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
                 last_signal = "sell"
 
@@ -178,7 +177,6 @@ def trading_bot():
         except Exception as e:
             logging.error(f"Error in trading bot: {e}", exc_info=True)
             time.sleep(60)
-
 
 # Run Flask Web Server and Trading Bot
 if __name__ == "__main__":
