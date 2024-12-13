@@ -112,6 +112,7 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
 
 # Main trading bot logic
+# Main trading bot logic
 def trading_bot():
     global last_price, last_signal, initialized, atr_values
 
@@ -128,6 +129,7 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
+            logging.info("Fetching historical data...")
             high, low, close = fetch_historical_data()
             if high is None or low is None or close is None:
                 logging.error("Historical data is missing. Skipping this cycle.")
@@ -139,28 +141,31 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
+            logging.info("Calculating ATR...")
             atr = calculate_atr(high, low, close)
             if atr is None or np.isnan(atr):
                 logging.error("ATR value is None or NaN. Skipping this cycle.")
                 time.sleep(60)
                 continue
+            logging.info(f"Calculated ATR: {atr}")
 
             atr_values.append(atr)
             if len(atr_values) > volatility_window:
                 atr_values.pop(0)
 
+            logging.info("Calculating SuperTrend...")
             supertrend_value, direction = calculate_supertrend(
                 high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
             )
-
-            logging.info(f"Latest Price: {latest_price}")
             logging.info(f"SuperTrend Value: {supertrend_value}")
             logging.info(f"Current Direction: {direction}")
 
             if last_signal == "sell" and direction == 1:
+                logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
                 last_signal = "buy"
             elif last_signal == "buy" and direction == -1:
+                logging.info(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
                 last_signal = "sell"
 
@@ -171,8 +176,9 @@ def trading_bot():
             time.sleep(60)
 
         except Exception as e:
-            logging.error(f"Error in trading bot: {e}")
+            logging.error(f"Error in trading bot: {e}", exc_info=True)
             time.sleep(60)
+
 
 # Run Flask Web Server and Trading Bot
 if __name__ == "__main__":
