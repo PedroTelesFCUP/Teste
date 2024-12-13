@@ -6,12 +6,12 @@ import logging
 from alpaca_trade_api.rest import REST
 from flask import Flask
 from threading import Thread
-import sys  # For logging to stdout
+import sys  # Add sys for logging to stdout
 
-# Alpaca API Credentials
+# Alpaca API Credentials (read from environment variables)
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL = "https://paper-api.alpaca.markets"
+BASE_URL = "https://paper-api.alpaca.markets"  # Paper trading endpoint
 
 if not API_KEY or not SECRET_KEY:
     logging.error("Missing Alpaca API credentials! Ensure ALPACA_API_KEY and ALPACA_SECRET_KEY are set.")
@@ -23,13 +23,13 @@ api = REST(API_KEY, SECRET_KEY, BASE_URL)
 # Parameters for SuperTrend
 ATR_LEN = 10
 FACTOR = 3
-SYMBOL = "BTC/USD"
-QUANTITY = round(0.001, 8)
+SYMBOL = "BTC/USD"  # Correct cryptocurrency symbol format
+QUANTITY = round(0.001, 8)  # Adjust for fractional trading with required precision
 
 # Configure Logging
 logging.basicConfig(
-    stream=sys.stdout,
-    level=logging.DEBUG,
+    stream=sys.stdout,  # Ensure logs are visible in Render's dashboard
+    level=logging.DEBUG,  # Set to DEBUG for detailed logs
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logging.info("Trading bot initialized.")
@@ -82,7 +82,7 @@ def supertrend(high, low, close, atr, factor):
 def fetch_market_data(symbol, limit=100):
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        bars = api.get_crypto_bars(symbol.replace("/", ""), "1Min", limit=limit).df
+        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
         if bars.empty:
             logging.warning("No market data returned!")
             return pd.DataFrame()
@@ -97,7 +97,7 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
-            symbol=symbol.replace("/", ""),
+            symbol=symbol,
             qty=quantity,
             side=side,
             type="market",
@@ -173,6 +173,4 @@ if __name__ == "__main__":
 
     # Start the trading bot in the main thread
     trading_bot()
-
-
 
