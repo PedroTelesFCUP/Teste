@@ -44,6 +44,9 @@ app = Flask(__name__)
 def home():
     return "Bot is running!", 200
 
+# Global variable to track the last processed price
+last_price = None
+
 # Functions for Trading Logic
 def calculate_atr(high, low, close, period):
     tr1 = high - low
@@ -82,7 +85,7 @@ def supertrend(high, low, close, atr, factor):
 def fetch_market_data(symbol, limit=100):
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        bars = api.get_crypto_bars(symbol.replace("/", ""), "1Min", limit=limit).df
+        bars = api.get_crypto_bars(symbol.replace("/", "-"), "1Min", limit=limit).df
         if bars.empty:
             logging.warning("No market data returned!")
             return pd.DataFrame()
@@ -96,7 +99,7 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
-            symbol=symbol.replace("/", ""),
+            symbol=symbol.replace("/", "-"),
             qty=quantity,
             side=side,
             type="market",
@@ -112,13 +115,14 @@ async def on_trade(trade):
 async def start_stream():
     while True:
         try:
-            await stream.subscribe_crypto_trades(on_trade, SYMBOL.replace("/", ""))
+            await stream.subscribe_crypto_trades(on_trade, SYMBOL.replace("/", "-"))
             await stream.run()
         except Exception as e:
             logging.error(f"WebSocket disconnected: {e}")
             await asyncio.sleep(5)  # Reconnect after a delay
 
 def trading_bot():
+    global last_price  # Use the global variable to store the last price
     logging.info("Trading bot started.")
     while True:
         try:
@@ -130,6 +134,16 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
+            # Check if the latest price is different from the last processed price
+            latest_price = data["close"].iloc[-1]
+            if last_price == latest_price:
+                logging.info("No new price updates. Skipping this cycle.")
+                time.sleep(60)
+                continue
+
+            # Update the last processed price
+            last_price = latest_price
+
             logging.info("Calculating SuperTrend...")
             data["atr"] = calculate_atr(data["high"], data["low"], data["close"], ATR_LEN)
             data["supertrend"], data["direction"] = supertrend(
@@ -137,7 +151,6 @@ def trading_bot():
             )
 
             # Log current SuperTrend values
-            latest_price = data["close"].iloc[-1]
             latest_supertrend = data["supertrend"].iloc[-1]
             latest_direction = data["direction"].iloc[-1]
             previous_direction = data["direction"].iloc[-2]
