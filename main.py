@@ -30,7 +30,7 @@ except Exception as e:
 # Parameters for SuperTrend
 ATR_LEN = 10
 FACTOR = 3
-SYMBOL = "BTC/USD"  # Cryptocurrency symbol
+SYMBOL = "BTC/USD"  # Correct cryptocurrency symbol format
 QUANTITY = round(0.001, 8)  # Adjust for fractional trading with required precision
 
 # Configure Logging
@@ -94,6 +94,7 @@ def fetch_market_data(symbol, limit=100):
             logging.warning("No market data returned!")
             return pd.DataFrame()
         bars = bars.tz_convert("America/New_York")
+        logging.info(f"Fetched {len(bars)} bars for {symbol}")
         return bars
     except Exception as e:
         logging.error(f"Error fetching market data: {e}")
@@ -199,4 +200,5 @@ if __name__ == "__main__":
 
     # Run WebSocket asynchronously
     asyncio.run(start_stream())
+
 
