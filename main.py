@@ -62,6 +62,42 @@ def fetch_realtime_price():
         logging.error(f"Error fetching real-time price: {e}")
         return None
 
+# Fetch historical market data using CoinGecko
+def fetch_historical_data(symbol="bitcoin", vs_currency="usd", days=1):
+    """
+    Fetch historical market data for the last `days` using CoinGecko.
+    Returns a DataFrame with high, low, and close prices.
+    """
+    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart"
+    params = {"vs_currency": vs_currency, "days": days, "interval": "minute"}
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        # Extract and process historical data
+        prices = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
+        prices["timestamp"] = pd.to_datetime(prices["timestamp"], unit="ms")
+        prices["high"] = prices["close"]  # CoinGecko does not provide separate high/low
+        prices["low"] = prices["close"]  # Using close as a proxy for high/low
+        return prices[["high", "low", "close"]]
+    except Exception as e:
+        logging.error(f"Error fetching historical data: {e}")
+        return pd.DataFrame()
+
+# Calculate Average True Range (ATR)
+def calculate_atr(prices, period=ATR_LEN):
+    """Calculate the ATR based on historical prices."""
+    high = prices["high"]
+    low = prices["low"]
+    close = prices["close"].shift(1)
+    tr1 = high - low
+    tr2 = abs(high - close)
+    tr3 = abs(low - close)
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    return atr.iloc[-1]  # Return the latest ATR value
+
 # Calculate SuperTrend
 def calculate_supertrend(latest_price):
     """Mock SuperTrend calculation for demonstration purposes."""
@@ -121,6 +157,17 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
+            # Fetch historical data for ATR calculation
+            historical_prices = fetch_historical_data()
+            if historical_prices.empty:
+                logging.warning("Failed to fetch historical data. Skipping this cycle.")
+                time.sleep(60)
+                continue
+
+            # Calculate ATR
+            atr = calculate_atr(historical_prices)
+            logging.info(f"Calculated ATR: {atr}")
+
             # Calculate SuperTrend
             supertrend_value, direction = calculate_supertrend(latest_price)
             logging.info(f"Latest Price: {latest_price}")
@@ -162,5 +209,6 @@ if __name__ == "__main__":
 
     # Start the trading bot in the main thread
     trading_bot()
+
 
 
