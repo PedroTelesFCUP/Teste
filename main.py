@@ -3,30 +3,30 @@ import time
 import numpy as np
 import pandas as pd
 import logging
+from alpaca_trade_api.rest import REST
+from alpaca_trade_api.stream import Stream
 from flask import Flask
 from threading import Thread
-from alpaca_trade_api.rest import REST
 
-# Alpaca API Credentials (stored securely in environment variables)
+# Alpaca API Credentials (stored securely in the environment)
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"  # Paper trading endpoint
 
-# Initialize Alpaca API
+# Initialize Alpaca REST API and WebSocket Stream
 api = REST(API_KEY, SECRET_KEY, BASE_URL)
+stream = Stream(API_KEY, SECRET_KEY, base_url="https://paper-api.alpaca.markets")
 
 # Parameters for SuperTrend
 ATR_LEN = 10
 FACTOR = 3
-SYMBOL = "BTC/USD"  # Crypto symbol
-QUANTITY = 1  # Number of units to trade
+SYMBOL = "BTC/USD"  # Cryptocurrency symbol
+QUANTITY = 0.001  # Adjust for fractional trading
 
 # Configure Logging
 logging.basicConfig(filename="bot.log", level=logging.INFO, format="%(asctime)s - %(message)s")
 logging.info("Trading bot initialized.")
 
-# Debugging Logs
-logging.info(f"Using Alpaca API Key: {API_KEY}")
 
 def calculate_atr(high, low, close, period):
     """Calculate the Average True Range (ATR)."""
@@ -67,13 +67,18 @@ def supertrend(high, low, close, atr, factor):
 
 
 def fetch_market_data(symbol, limit=100):
-    """Fetch 1-minute market data for crypto."""
+    """Fetch 1-minute market data for crypto and verify live updates."""
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
+        # Fetch bar data
         bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
         bars = bars.tz_convert("America/New_York")
-        logging.info(f"Fetched {len(bars)} data points.")
-        logging.info(f"Raw data:\n{bars}")
+        logging.info(f"Bar Data:\n{bars}")
+
+        # Fetch latest trade data for verification
+        latest_trade = api.get_latest_crypto_trades(symbol).df
+        logging.info(f"Latest Trade Data:\n{latest_trade}")
+
         return bars
     except Exception as e:
         logging.error(f"Error fetching market data: {e}")
@@ -82,7 +87,7 @@ def fetch_market_data(symbol, limit=100):
 
 def execute_trade(symbol, quantity, side):
     """Place a buy or sell order."""
-    logging.info(f"Executing {side} order for {quantity} units of {symbol}...")
+    logging.info(f"Executing {side} order for {quantity} of {symbol}...")
     try:
         order = api.submit_order(
             symbol=symbol,
@@ -96,19 +101,22 @@ def execute_trade(symbol, quantity, side):
         logging.error(f"Failed to execute {side} order: {e}")
 
 
+def on_trade(trade):
+    """Callback function for WebSocket trades."""
+    logging.info(f"Trade Data: {trade}")
+
+
 def trading_bot():
     """Main trading bot logic."""
     logging.info("Trading bot started.")
     print("Trading bot started.")
     while True:
         try:
-            logging.info("Starting a new cycle.")
             print("Fetching market data...")
             data = fetch_market_data(SYMBOL, limit=ATR_LEN + 1)
 
             if data.empty:
-                logging.warning("No data fetched. Skipping this cycle.")
-                time.sleep(60)
+                logging.warning("No market data available.")
                 continue
 
             print("Calculating SuperTrend...")
@@ -116,7 +124,7 @@ def trading_bot():
             data["supertrend"], data["direction"] = supertrend(
                 data["high"], data["low"], data["close"], data["atr"], FACTOR
             )
-            logging.info("SuperTrend calculation complete.")
+            print("SuperTrend calculation complete.")
 
             # Log current SuperTrend values and decision factors
             latest_price = data["close"].iloc[-1]
@@ -125,28 +133,29 @@ def trading_bot():
             previous_direction = data["direction"].iloc[-2]
             atr_value = data["atr"].iloc[-1]
 
-            logging.info(f"Latest Price: {latest_price}")
-            logging.info(f"Latest SuperTrend Value: {latest_supertrend}")
-            logging.info(f"ATR Value: {atr_value}")
-            logging.info(f"Current Direction: {latest_direction}")
-            logging.info(f"Previous Direction: {previous_direction}")
+            print(f"Latest Price: {latest_price}")
+            print(f"Latest SuperTrend Value: {latest_supertrend}")
+            print(f"ATR Value: {atr_value}")
+            print(f"Current Direction: {latest_direction}")
+            print(f"Previous Direction: {previous_direction}")
 
             # Determine buy/sell signals
             if latest_direction == 1 and previous_direction == -1:
-                logging.info(f"Buy signal detected at price {latest_price}.")
+                print(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
 
             elif latest_direction == -1 and previous_direction == 1:
-                logging.info(f"Sell signal detected at price {latest_price}.")
+                print(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
             else:
-                logging.info("No trade signal detected.")
+                print("No trade signal detected.")
 
             print("Sleeping for 1 minute...\n")
             time.sleep(60)
 
         except Exception as e:
             logging.error(f"Error in trading bot: {e}")
+            print(f"Error in trading bot: {e}")
             time.sleep(60)  # Retry after a delay
 
 
@@ -160,18 +169,24 @@ def home():
 
 def run_web_server():
     """Run the Flask web server."""
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    PORT = int(os.environ.get("PORT", 8080))  # Use environment PORT or 8080
+    app.run(host="0.0.0.0", port=PORT)
 
 
-# Run Flask Web Server and Trading Bot
+# Run Flask Web Server, Trading Bot, and WebSocket
 if __name__ == "__main__":
     # Start the web server in a separate thread
-    thread = Thread(target=run_web_server)
-    thread.daemon = True
-    thread.start()
+    thread1 = Thread(target=run_web_server)
+    thread1.daemon = True
+    thread1.start()
 
-    # Start the trading bot
-    trading_bot()
+    # Start the trading bot in a separate thread
+    thread2 = Thread(target=trading_bot)
+    thread2.daemon = True
+    thread2.start()
 
+    # Subscribe to WebSocket trades for live data
+    stream.subscribe_crypto_trades(on_trade, SYMBOL)
+    stream.run()
 
 
