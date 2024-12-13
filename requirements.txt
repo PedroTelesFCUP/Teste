@@ -2,3 +2,4 @@ flask
 alpaca-trade-api
 pandas
 numpy
+python-binance
