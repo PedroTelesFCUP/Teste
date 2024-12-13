@@ -67,18 +67,11 @@ def supertrend(high, low, close, atr, factor):
 
 
 def fetch_market_data(symbol, limit=100):
-    """Fetch 1-minute market data for crypto and verify live updates."""
+    """Fetch 1-minute market data for crypto."""
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        # Fetch bar data
         bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
         bars = bars.tz_convert("America/New_York")
-        logging.info(f"Bar Data:\n{bars}")
-
-        # Fetch latest trade data for verification
-        latest_trade = api.get_latest_crypto_trades(symbol).df
-        logging.info(f"Latest Trade Data:\n{latest_trade}")
-
         return bars
     except Exception as e:
         logging.error(f"Error fetching market data: {e}")
@@ -101,7 +94,7 @@ def execute_trade(symbol, quantity, side):
         logging.error(f"Failed to execute {side} order: {e}")
 
 
-def on_trade(trade):
+async def on_trade(trade):
     """Callback function for WebSocket trades."""
     logging.info(f"Trade Data: {trade}")
 
