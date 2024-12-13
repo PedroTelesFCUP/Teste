@@ -97,17 +97,27 @@ def calculate_atr(high, low, close):
     return atr.iloc[-1]  # Return the latest ATR value
 
 # Calculate SuperTrend
-def calculate_supertrend(high, low, close, atr):
+def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend):
     """Calculate the SuperTrend value based on the fixed ATR factor."""
     hl2 = (high + low) / 2
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
-    # Initialize direction and SuperTrend value
-    direction = 1 if close.iloc[-2] > upper_band.iloc[-2] else -1
-    supertrend = lower_band if direction == 1 else upper_band
+    # Band adjustment logic
+    lower_band = np.where((lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
+                          lower_band, prev_lower_band)
+    upper_band = np.where((upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
+                          upper_band, prev_upper_band)
 
-    return supertrend.iloc[-1], direction
+    # Direction and SuperTrend value
+    if prev_supertrend == prev_upper_band:
+        direction = -1 if close.iloc[-1] > upper_band[-1] else 1
+    else:
+        direction = 1 if close.iloc[-1] < lower_band[-1] else -1
+
+    supertrend = lower_band[-1] if direction == 1 else upper_band[-1]
+
+    return supertrend, direction
 
 # Execute a trade on Alpaca
 def execute_trade(symbol, quantity, side):
@@ -135,6 +145,12 @@ def execute_trade(symbol, quantity, side):
 def trading_bot():
     global last_price, last_signal, initialized, accumulated_quantity
     logging.info("Trading bot started.")
+
+    # Variables to track previous bands and SuperTrend
+    prev_upper_band = None
+    prev_lower_band = None
+    prev_supertrend = None
+
     while True:
         try:
             logging.info("Fetching real-time BTC/USD price...")
@@ -171,10 +187,19 @@ def trading_bot():
             # Calculate ATR and SuperTrend
             atr = calculate_atr(high, low, close)
             logging.info(f"Calculated ATR: {atr}")  # Log the ATR value
-            supertrend_value, direction = calculate_supertrend(high, low, close, atr)
+
+            supertrend_value, direction = calculate_supertrend(
+                high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
+            )
+
             logging.info(f"Latest Price: {latest_price}")
             logging.info(f"SuperTrend Value: {supertrend_value}")
             logging.info(f"Current Direction: {direction}")
+
+            # Update previous bands and SuperTrend
+            prev_upper_band = supertrend_value if direction == -1 else prev_upper_band
+            prev_lower_band = supertrend_value if direction == 1 else prev_lower_band
+            prev_supertrend = supertrend_value
 
             # Only execute trades on valid direction changes
             if last_signal == "sell" and direction == 1:  # Transition from sell to buy
@@ -205,5 +230,6 @@ if __name__ == "__main__":
 
     # Start the trading bot in the main thread
     trading_bot()
+
 
 
