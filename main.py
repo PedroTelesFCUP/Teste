@@ -7,7 +7,7 @@ from flask import Flask
 from threading import Thread
 from alpaca_trade_api.rest import REST
 
-# Alpaca API Credentials (stored securely in Render's Environment)
+# Alpaca API Credentials (stored securely in environment variables)
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"  # Paper trading endpoint
@@ -18,20 +18,15 @@ api = REST(API_KEY, SECRET_KEY, BASE_URL)
 # Parameters for SuperTrend
 ATR_LEN = 10
 FACTOR = 3
-SYMBOL = "BTC/USD"  # Bitcoin trading pair
-QUANTITY = 0.01  # Quantity of Bitcoin to trade (adjust as needed for testing)
+SYMBOL = "BTC/USD"  # Crypto symbol
+QUANTITY = 1  # Number of units to trade
 
 # Configure Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(message)s",
-    handlers=[
-        logging.FileHandler("bot.log"),  # Log to file
-        logging.StreamHandler()         # Log to console
-    ]
-)
+logging.basicConfig(filename="bot.log", level=logging.INFO, format="%(asctime)s - %(message)s")
 logging.info("Trading bot initialized.")
 
+# Debugging Logs
+logging.info(f"Using Alpaca API Key: {API_KEY}")
 
 def calculate_atr(high, low, close, period):
     """Calculate the Average True Range (ATR)."""
@@ -72,23 +67,22 @@ def supertrend(high, low, close, atr, factor):
 
 
 def fetch_market_data(symbol, limit=100):
-    """Fetch historical 1-minute market data from Alpaca."""
+    """Fetch 1-minute market data for crypto."""
     logging.info(f"Fetching 1-minute market data for {symbol}...")
     try:
-        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df  # Fetch 1-minute data
-        bars = bars.tz_convert("America/New_York")  # Convert to your timezone
+        bars = api.get_crypto_bars(symbol, "1Min", limit=limit).df
+        bars = bars.tz_convert("America/New_York")
         logging.info(f"Fetched {len(bars)} data points.")
-        print("Market Data:\n", bars.tail())
+        logging.info(f"Raw data:\n{bars}")
         return bars
     except Exception as e:
         logging.error(f"Error fetching market data: {e}")
-        print(f"Error fetching market data: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame()  # Return empty DataFrame on error
 
 
 def execute_trade(symbol, quantity, side):
     """Place a buy or sell order."""
-    logging.info(f"Executing {side} order for {quantity} of {symbol}...")
+    logging.info(f"Executing {side} order for {quantity} units of {symbol}...")
     try:
         order = api.submit_order(
             symbol=symbol,
@@ -100,55 +94,36 @@ def execute_trade(symbol, quantity, side):
         logging.info(f"{side.capitalize()} order submitted successfully.")
     except Exception as e:
         logging.error(f"Failed to execute {side} order: {e}")
-        print(f"Failed to execute {side} order: {e}")
-
-
-def log_account_activity():
-    """Fetch and log recent account activity."""
-    try:
-        logging.info("Fetching account activity...")
-        activities = api.get_activities()
-        for activity in activities[:5]:  # Limit to the last 5 activities
-            logging.info(f"Activity: {activity}")
-    except Exception as e:
-        logging.error(f"Error fetching account activity: {e}")
 
 
 def trading_bot():
     """Main trading bot logic."""
     logging.info("Trading bot started.")
     print("Trading bot started.")
-    try:
-        account = api.get_account()
-        logging.info(f"Alpaca Account Status: {account.status}")
-    except Exception as e:
-        logging.error(f"Error connecting to Alpaca API: {e}")
-        return
-
     while True:
-        logging.info("Heartbeat: Starting a new cycle.")
         try:
-            log_account_activity()  # Log account activities at the start of each cycle
-
-            logging.info("Fetching market data...")
+            logging.info("Starting a new cycle.")
+            print("Fetching market data...")
             data = fetch_market_data(SYMBOL, limit=ATR_LEN + 1)
+
             if data.empty:
-                logging.warning("No market data available. Retrying in 1 minute...")
+                logging.warning("No data fetched. Skipping this cycle.")
                 time.sleep(60)
                 continue
 
-            logging.info("Calculating SuperTrend...")
+            print("Calculating SuperTrend...")
             data["atr"] = calculate_atr(data["high"], data["low"], data["close"], ATR_LEN)
             data["supertrend"], data["direction"] = supertrend(
                 data["high"], data["low"], data["close"], data["atr"], FACTOR
             )
+            logging.info("SuperTrend calculation complete.")
 
-            # Log details
+            # Log current SuperTrend values and decision factors
             latest_price = data["close"].iloc[-1]
             latest_supertrend = data["supertrend"].iloc[-1]
-            atr_value = data["atr"].iloc[-1]
             latest_direction = data["direction"].iloc[-1]
             previous_direction = data["direction"].iloc[-2]
+            atr_value = data["atr"].iloc[-1]
 
             logging.info(f"Latest Price: {latest_price}")
             logging.info(f"Latest SuperTrend Value: {latest_supertrend}")
@@ -156,22 +131,23 @@ def trading_bot():
             logging.info(f"Current Direction: {latest_direction}")
             logging.info(f"Previous Direction: {previous_direction}")
 
-            # Trade signals
+            # Determine buy/sell signals
             if latest_direction == 1 and previous_direction == -1:
                 logging.info(f"Buy signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
+
             elif latest_direction == -1 and previous_direction == 1:
                 logging.info(f"Sell signal detected at price {latest_price}.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
             else:
                 logging.info("No trade signal detected.")
 
-            logging.info("Sleeping for 1 minute...\n")
+            print("Sleeping for 1 minute...\n")
             time.sleep(60)
 
         except Exception as e:
             logging.error(f"Error in trading bot: {e}")
-            time.sleep(60)
+            time.sleep(60)  # Retry after a delay
 
 
 # Flask Web Server for Uptime Monitoring
@@ -184,8 +160,7 @@ def home():
 
 def run_web_server():
     """Run the Flask web server."""
-    PORT = int(os.environ.get("PORT", 8080))  # Default to 8080 if PORT not set
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 
 # Run Flask Web Server and Trading Bot
@@ -197,5 +172,6 @@ if __name__ == "__main__":
 
     # Start the trading bot
     trading_bot()
+
 
 
