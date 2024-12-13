@@ -9,7 +9,6 @@ from flask import Flask
 from threading import Thread
 import sys  # Add sys for logging to stdout
 from binance.client import Client
-from sklearn.cluster import KMeans  # For k-means clustering
 
 # Binance API Credentials (read from environment variables)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
@@ -32,7 +31,7 @@ api = REST(API_KEY, SECRET_KEY, BASE_URL)
 
 # Parameters for SuperTrend
 ATR_LEN = 10
-TRAINING_DATA_PERIOD = 100
+ATR_FACTOR = 3.0  # Fixed factor as in Pine Script
 SYMBOL = "BTC/USD"  # Correct cryptocurrency symbol format
 BINANCE_SYMBOL = "BTCUSDT"  # Binance uses a different symbol format
 QUANTITY = round(0.001, 8)  # Adjust for fractional trading with required precision
@@ -70,7 +69,7 @@ def fetch_realtime_price():
         return None
 
 # Fetch historical market data using Binance
-def fetch_historical_data(symbol=BINANCE_SYMBOL, interval="1m", limit=TRAINING_DATA_PERIOD):
+def fetch_historical_data(symbol=BINANCE_SYMBOL, interval="1m", limit=ATR_LEN + 1):
     """
     Fetch historical market data using Binance.
     Returns a DataFrame with high, low, and close prices.
@@ -81,56 +80,34 @@ def fetch_historical_data(symbol=BINANCE_SYMBOL, interval="1m", limit=TRAINING_D
             "open_time", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume",
             "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
         ])
-        prices = prices[["high", "low", "close"]].astype(float)
+        prices = prices["high"].astype(float), prices["low"].astype(float), prices["close"].astype(float)
         return prices
     except Exception as e:
         logging.error(f"Error fetching historical data from Binance: {e}")
-        return pd.DataFrame()
+        return None, None, None
 
 # Calculate Average True Range (ATR)
-def calculate_atr(prices, period=ATR_LEN):
+def calculate_atr(high, low, close):
     """Calculate the ATR based on historical prices."""
-    high = prices["high"]
-    low = prices["low"]
-    close = prices["close"].shift(1)
     tr1 = high - low
-    tr2 = abs(high - close)
-    tr3 = abs(low - close)
+    tr2 = abs(high - close.shift(1))
+    tr3 = abs(low - close.shift(1))
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(window=period).mean()
+    atr = tr.rolling(window=ATR_LEN).mean()
     return atr.iloc[-1]  # Return the latest ATR value
 
-# Perform k-means clustering to classify volatility levels
-def classify_volatility(prices):
-    """Classify volatility into high, medium, and low clusters using k-means."""
-    try:
-        atr_values = prices["close"].rolling(window=ATR_LEN).std().dropna().values.reshape(-1, 1)
-        kmeans = KMeans(n_clusters=3, random_state=42)
-        kmeans.fit(atr_values)
-
-        # Assign cluster centroids to volatility levels
-        centroids = kmeans.cluster_centers_.flatten()
-        centroids.sort()  # Ensure low, medium, and high order
-        low, medium, high = centroids
-
-        # Determine current volatility cluster
-        current_atr = atr_values[-1][0]
-        if current_atr <= low:
-            return low, "low"
-        elif low < current_atr <= medium:
-            return medium, "medium"
-        else:
-            return high, "high"
-    except Exception as e:
-        logging.error(f"Error in k-means clustering: {e}")
-        return 3.0, "medium"  # Default factor
-
 # Calculate SuperTrend
-def calculate_supertrend(latest_price, atr_factor):
-    """Calculate the SuperTrend value dynamically based on ATR factor."""
-    supertrend_value = latest_price - (latest_price * atr_factor / 100)
-    direction = 1 if latest_price > supertrend_value else -1
-    return supertrend_value, direction
+def calculate_supertrend(high, low, close, atr):
+    """Calculate the SuperTrend value based on the fixed ATR factor."""
+    hl2 = (high + low) / 2
+    upper_band = hl2 + ATR_FACTOR * atr
+    lower_band = hl2 - ATR_FACTOR * atr
+
+    # Initialize direction and SuperTrend value
+    direction = 1 if close.iloc[-2] > upper_band.iloc[-2] else -1
+    supertrend = lower_band if direction == 1 else upper_band
+
+    return supertrend.iloc[-1], direction
 
 # Execute a trade on Alpaca
 def execute_trade(symbol, quantity, side):
@@ -185,18 +162,15 @@ def trading_bot():
                 continue
 
             # Fetch historical data for ATR calculation
-            historical_prices = fetch_historical_data()
-            if historical_prices.empty:
+            high, low, close = fetch_historical_data()
+            if high is None or low is None or close is None:
                 logging.warning("Failed to fetch historical data. Skipping this cycle.")
                 time.sleep(60)
                 continue
 
-            # Classify volatility and calculate dynamic ATR factor
-            atr_factor, volatility_level = classify_volatility(historical_prices)
-            logging.info(f"Classified volatility as {volatility_level} with ATR factor: {atr_factor}")
-
-            # Calculate SuperTrend
-            supertrend_value, direction = calculate_supertrend(latest_price, atr_factor)
+            # Calculate ATR and SuperTrend
+            atr = calculate_atr(high, low, close)
+            supertrend_value, direction = calculate_supertrend(high, low, close, atr)
             logging.info(f"Latest Price: {latest_price}")
             logging.info(f"SuperTrend Value: {supertrend_value}")
             logging.info(f"Current Direction: {direction}")
