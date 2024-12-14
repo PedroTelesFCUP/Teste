@@ -83,13 +83,20 @@ def calculate_supertrend(high, low, close, atr):
     else:
         direction = 0  # Neutral
 
-    supertrend = lower_band.iloc[-1] if direction == 1 else upper_band.iloc[-1]
+    # Calculate SuperTrend
+    if direction == 1:
+        supertrend = lower_band.iloc[-1]
+    elif direction == -1:
+        supertrend = upper_band.iloc[-1]
+    else:
+        supertrend = None  # Neutral state
 
     # Log values for debugging
     logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
     logging.info(f"Calculated ATR: {atr}")
 
     return supertrend, direction, upper_band.iloc[-1], lower_band.iloc[-1]
+
 
 # Execute a Trade
 def execute_trade(symbol, quantity, side):
