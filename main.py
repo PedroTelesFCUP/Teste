@@ -6,6 +6,7 @@ import logging
 from flask import Flask
 from threading import Thread
 from binance.client import Client
+from sklearn.cluster import KMeans
 
 # Binance API Credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
@@ -32,8 +33,53 @@ app = Flask(__name__)
 def home():
     return "Bot is running!", 200
 
-# Globals
-last_direction = 0  # Track the previous direction
+# Perform K-Means Clustering on volatility
+def cluster_volatility(volatility, n_clusters=3):
+    if len(volatility) < n_clusters:
+        logging.error("Not enough data points for clustering. Skipping.")
+        return None, None, None
+    try:
+        volatility = np.array(volatility).reshape(-1, 1)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        kmeans.fit(volatility)
+        centroids = kmeans.cluster_centers_.flatten()
+        assigned_cluster = kmeans.predict([[volatility[-1][0]]])[0]
+        assigned_centroid = centroids[assigned_cluster]
+        return centroids, assigned_cluster, assigned_centroid
+    except Exception as e:
+        logging.error(f"Clustering failed: {e}")
+        return None, None, None
+
+# Calculate ATR
+def calculate_atr(high, low, close):
+    tr1 = high - low
+    tr2 = abs(high - close.shift(1))
+    tr3 = abs(low - close.shift(1))
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.rolling(window=ATR_LEN).mean().iloc[-1]
+
+# Calculate SuperTrend using cluster-based ATR
+def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
+    if len(high) == 0 or len(low) == 0 or len(close) == 0:
+        logging.error("Insufficient market data for SuperTrend calculation. Skipping.")
+        return None, None, None, None
+    if assigned_centroid is None:
+        logging.error("Invalid centroid. Skipping SuperTrend calculation.")
+        return None, None, None, None
+
+    hl2 = (high + low) / 2
+    upper_band = hl2 + ATR_FACTOR * assigned_centroid
+    lower_band = hl2 - ATR_FACTOR * assigned_centroid
+
+    if close.iloc[-1] > upper_band.iloc[-1]:
+        direction = -1  # Bearish
+    elif close.iloc[-1] < lower_band.iloc[-1]:
+        direction = 1  # Bullish
+    else:
+        direction = 0  # Neutral
+
+    supertrend = lower_band.iloc[-1] if direction == 1 else upper_band.iloc[-1]
+    return supertrend, direction, upper_band, lower_band
 
 # Fetch Real-Time Price
 def fetch_realtime_price():
@@ -56,48 +102,6 @@ def fetch_historical_data():
         logging.error(f"Error fetching historical data: {e}")
         return None, None, None
 
-# Calculate ATR
-def calculate_atr(high, low, close):
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(window=ATR_LEN).mean().iloc[-1]
-
-# Calculate SuperTrend
-def calculate_supertrend(high, low, close, atr):
-    hl2 = (high + low) / 2
-    upper_band = hl2 + ATR_FACTOR * atr
-    lower_band = hl2 - ATR_FACTOR * atr
-
-    # Validate bands
-    if len(upper_band) == 0 or len(lower_band) == 0 or len(close) == 0:
-        logging.error("Insufficient data for bands or close. Skipping this cycle.")
-        return None, None, None, None
-
-    # Determine direction based on price vs bands
-    if close.iloc[-1] > upper_band.iloc[-1]:
-        direction = -1  # Bearish
-    elif close.iloc[-1] < lower_band.iloc[-1]:
-        direction = 1  # Bullish
-    else:
-        direction = 0  # Neutral
-
-    # Calculate SuperTrend
-    if direction == 1:
-        supertrend = lower_band.iloc[-1]
-    elif direction == -1:
-        supertrend = upper_band.iloc[-1]
-    else:
-        supertrend = None  # Neutral state
-
-    # Log values for debugging
-    logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
-    logging.info(f"Calculated ATR: {atr}")
-
-    return supertrend, direction, upper_band.iloc[-1], lower_band.iloc[-1]
-
-
 # Execute a Trade
 def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
@@ -105,6 +109,8 @@ def execute_trade(symbol, quantity, side):
 # Main Trading Bot
 def trading_bot():
     global last_direction
+    volatility = []
+    last_direction = 0
 
     while True:
         try:
@@ -123,29 +129,40 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
-            supertrend_value, direction, upper_band, lower_band = calculate_supertrend(
-                high, low, close, atr
+            # Add ATR to volatility list
+            volatility.append(atr)
+            if len(volatility) > 100:  # Limit volatility history size
+                volatility.pop(0)
+
+            # Cluster Volatility
+            centroids, assigned_cluster, assigned_centroid = cluster_volatility(volatility)
+            if assigned_centroid is None:
+                logging.warning("Clustering failed. Skipping cycle.")
+                time.sleep(60)
+                continue
+
+            # Calculate SuperTrend
+            supertrend, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
+                high, low, close, assigned_centroid
             )
 
-            if supertrend_value is None or direction is None:
-                logging.warning("Skipping cycle due to invalid SuperTrend calculation.")
+            if supertrend is None:
+                logging.warning("SuperTrend calculation failed. Skipping cycle.")
                 time.sleep(60)
                 continue
 
-            # Skip neutral direction
-            if direction == 0:
-                logging.info("Neutral state detected. Waiting for a valid signal.")
-                time.sleep(60)
-                continue
+            logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
 
-            # Execute trade when transitioning from neutral to valid signal
+            # Execute trade if signal changes
             if last_direction == 0 and direction in [1, -1]:
                 trade_type = "buy" if direction == 1 else "sell"
                 execute_trade(SYMBOL, QUANTITY, trade_type)
-                last_direction = direction
-                continue
+            elif last_direction == 1 and direction == -1:
+                execute_trade(SYMBOL, QUANTITY, "sell")
+            elif last_direction == -1 and direction == 1:
+                execute_trade(SYMBOL, QUANTITY, "buy")
 
-            # Update direction for next cycle
+            # Update last direction
             last_direction = direction
             time.sleep(60)
 
@@ -157,5 +174,6 @@ def trading_bot():
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     trading_bot()
+
 
 
