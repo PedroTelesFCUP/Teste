@@ -173,10 +173,10 @@ def on_message(msg):
         # Perform real-time SuperTrend calculation
         calculate_and_execute(last_price)
 
-        # Wait for 3 seconds before processing the next message
+        # Wait for 3 seconds to avoid exceeding API limits
         time.sleep(3)
     except Exception as e:
-        logging.error(f"Error processing WebSocket message: {e}")
+        logging.error(f"Error processing WebSocket message: {e}", exc_info=True)
 
 
 # Robust WebSocket Start
@@ -231,14 +231,15 @@ def calculate_and_execute(price):
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
-    # Log All Metrics
+    # Log Metrics (Handle None Values Gracefully)
+    supertrend_str = f"{supertrend:.2f}" if supertrend is not None else "None"
     logging.info(
         f"\nPrice: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
         f"Volatility Level: {volatility_level}\n"
         f"Cluster Centroids: {centroids}\n"
         f"Cluster Sizes: {cluster_sizes}\n"
-        f"SuperTrend: {supertrend:.2f if supertrend else 'None'}\n"
+        f"SuperTrend: {supertrend_str}\n"
         f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
         f"Upper Band: {upper_band.iloc[-1]:.2f}, Lower Band: {lower_band.iloc[-1]:.2f}\n"
     )
