@@ -107,9 +107,37 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
 
 # Main Trading Bot
+def initialize_volatility_from_history():
+    """Fetch historical data and calculate ATR values to initialize volatility."""
+    try:
+        # Fetch enough historical data for ATR calculation
+        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
+        data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
+                                             "close_time", "quote_asset_volume", "number_of_trades",
+                                             "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
+        high = data["high"].astype(float)
+        low = data["low"].astype(float)
+        close = data["close"].astype(float)
+
+        # Calculate ATR for historical data
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=ATR_LEN).mean()
+
+        # Return the last 100 ATR values as volatility
+        volatility = atr[-100:].dropna().tolist()
+        logging.info(f"Initialized volatility with {len(volatility)} historical ATR values.")
+        return volatility
+    except Exception as e:
+        logging.error(f"Error initializing volatility: {e}")
+        return []
+
 def trading_bot():
     global last_direction
-    volatility = []  # Stores ATR values
+    # Initialize volatility using historical data
+    volatility = initialize_volatility_from_history()
     last_direction = 0
 
     while True:
@@ -130,16 +158,10 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
-            # Add ATR to volatility list
+            # Add the latest ATR value to volatility
             volatility.append(atr)
             if len(volatility) > 100:  # Limit history to the last 100 values
                 volatility.pop(0)
-
-            # Ensure sufficient data points for clustering
-            if len(volatility) < 3:  # Require at least 3 points (or n_clusters)
-                logging.warning("Insufficient data for clustering. Waiting for more data.")
-                time.sleep(60)
-                continue
 
             # Cluster Volatility
             centroids, assigned_cluster, assigned_centroid = cluster_volatility(volatility)
@@ -176,7 +198,6 @@ def trading_bot():
         except Exception as e:
             logging.error(f"Error in trading bot: {e}", exc_info=True)
             time.sleep(60)
-
 
 # Run Flask and Trading Bot
 if __name__ == "__main__":
