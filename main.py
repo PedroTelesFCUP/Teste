@@ -53,8 +53,8 @@ def cluster_volatility(volatility, n_clusters=3):
         assigned_cluster = kmeans.predict([[latest_volatility]])[0]
         assigned_centroid = centroids[assigned_cluster]
 
-        # Calculate cluster sizes
-        cluster_sizes = [np.sum(labels == i) for i in range(n_clusters)]
+        # Calculate cluster sizes and convert to standard Python integers
+        cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
 
         # Calculate volatility level
         volatility_level = assigned_cluster + 1  # Pine uses 1-based indexing
@@ -63,6 +63,7 @@ def cluster_volatility(volatility, n_clusters=3):
     except Exception as e:
         logging.error(f"Clustering failed: {e}")
         return None, None, None, None, None
+
 
 # Calculate ATR
 def calculate_atr(high, low, close):
