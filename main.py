@@ -155,6 +155,7 @@ def on_message(msg):
     global last_price, high, low, close
 
     try:
+        # Extract price data from WebSocket message
         candle = msg['k']
         last_price = float(candle['c'])  # Closing price
         high.append(float(candle['h']))
@@ -171,8 +172,12 @@ def on_message(msg):
 
         # Perform real-time SuperTrend calculation
         calculate_and_execute(last_price)
+
+        # Wait for 3 seconds before processing the next message
+        time.sleep(3)
     except Exception as e:
         logging.error(f"Error processing WebSocket message: {e}")
+
 
 # Robust WebSocket Start
 def start_websocket():
@@ -204,7 +209,7 @@ def execute_trade(symbol, quantity, side):
     except Exception as e:
         logging.error(f"Error executing {side} order: {e}")
 
-# Calculate and Execute Trades
+# Simplified `calculate_and_execute` with Enhanced Logging
 def calculate_and_execute(price):
     global last_direction
 
@@ -218,11 +223,27 @@ def calculate_and_execute(price):
         logging.warning("Clustering failed. Skipping cycle.")
         return
 
+    # Calculate ATR
+    atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
+
+    # Calculate SuperTrend
     supertrend, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
-    # Handle signal changes and execute trades
+    # Log All Metrics
+    logging.info(
+        f"\nPrice: {price:.2f}\n"
+        f"ATR: {atr:.2f}\n"
+        f"Volatility Level: {volatility_level}\n"
+        f"Cluster Centroids: {centroids}\n"
+        f"Cluster Sizes: {cluster_sizes}\n"
+        f"SuperTrend: {supertrend:.2f if supertrend else 'None'}\n"
+        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+        f"Upper Band: {upper_band.iloc[-1]:.2f}, Lower Band: {lower_band.iloc[-1]:.2f}\n"
+    )
+
+    # Execute trades based on signal changes
     if last_direction == 0 and direction in [1, -1]:
         trade_type = "buy" if direction == 1 else "sell"
         execute_trade(ALPACA_SYMBOL, QUANTITY, trade_type)
@@ -232,6 +253,7 @@ def calculate_and_execute(price):
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
 
     last_direction = direction
+
 
 # Start Flask and WebSocket
 if __name__ == "__main__":
