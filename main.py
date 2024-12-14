@@ -66,36 +66,35 @@ def calculate_atr(high, low, close):
     return tr.rolling(window=ATR_LEN).mean().iloc[-1]
 
 # Calculate SuperTrend
-def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend):
+def calculate_supertrend(high, low, close, atr):
     hl2 = (high + low) / 2
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
-    # Adjust bands based on previous values
-    if prev_upper_band is not None and prev_lower_band is not None:
-        lower_band = np.where(
-            (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
-            lower_band, prev_lower_band
-        )
-        upper_band = np.where(
-            (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
-            upper_band, prev_upper_band
-        )
+    # Ensure bands are not empty
+    if upper_band.empty or lower_band.empty:
+        logging.error("Bands are empty. Skipping this cycle.")
+        return None, None, None, None
 
-    # Calculate direction based on current price
-    if close.iloc[-1] > upper_band[-1]:
-        direction = -1
-    elif close.iloc[-1] < lower_band[-1]:
-        direction = 1
+    # Validate length of bands and close before accessing
+    if len(upper_band) == 0 or len(lower_band) == 0 or len(close) == 0:
+        logging.error("Insufficient data for bands or close. Skipping this cycle.")
+        return None, None, None, None
+
+    # Calculate direction based on price vs bands
+    if close.iloc[-1] > upper_band.iloc[-1]:
+        direction = -1  # Bearish
+    elif close.iloc[-1] < lower_band.iloc[-1]:
+        direction = 1  # Bullish
     else:
-        direction = prev_supertrend
+        direction = 0  # Neutral (price is within bands)
 
-    supertrend = lower_band[-1] if direction == 1 else upper_band[-1]
-    
+    supertrend = lower_band.iloc[-1] if direction == 1 else upper_band.iloc[-1]
+
     # Log values for debugging
-    logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band[-1]}, Lower Band: {lower_band[-1]}, Direction: {direction}")
-    
-    return supertrend, direction, upper_band[-1], lower_band[-1]
+    logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
+
+    return supertrend, direction, upper_band.iloc[-1], lower_band.iloc[-1]
 
 # Execute a Trade
 def execute_trade(symbol, quantity, side):
@@ -104,10 +103,6 @@ def execute_trade(symbol, quantity, side):
 # Main Trading Bot
 def trading_bot():
     global last_signal, initialized
-
-    prev_upper_band = None
-    prev_lower_band = None
-    prev_supertrend = None
 
     while True:
         try:
@@ -127,12 +122,18 @@ def trading_bot():
                 continue
 
             supertrend_value, direction, upper_band, lower_band = calculate_supertrend(
-                high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
+                high, low, close, atr
             )
+
+            if supertrend_value is None or direction is None:
+                logging.warning("Skipping cycle due to invalid SuperTrend calculation.")
+                time.sleep(60)
+                continue
 
             if not initialized:
                 initialized = True
                 last_signal = "buy" if direction == 1 else "sell"
+                logging.info(f"Initialization complete. First signal: {last_signal}")
                 continue
 
             if last_signal == "sell" and direction == 1:
@@ -142,7 +143,6 @@ def trading_bot():
                 execute_trade(SYMBOL, QUANTITY, "sell")
                 last_signal = "sell"
 
-            prev_upper_band, prev_lower_band, prev_supertrend = upper_band, lower_band, supertrend_value
             time.sleep(60)
 
         except Exception as e:
@@ -153,7 +153,6 @@ def trading_bot():
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     trading_bot()
-
 
 
 
