@@ -71,31 +71,30 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
-    # Validate previous bands
-    if prev_upper_band is None:
-        prev_upper_band = upper_band.iloc[-1] if len(upper_band) > 0 else hl2.iloc[-1]
-    if prev_lower_band is None:
-        prev_lower_band = lower_band.iloc[-1] if len(lower_band) > 0 else hl2.iloc[-1]
-    if prev_supertrend is None:
-        prev_supertrend = lower_band.iloc[-1] if close.iloc[-1] < hl2.iloc[-1] else upper_band.iloc[-1]
-
     # Adjust bands based on previous values
-    lower_band = np.where(
-        (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
-        lower_band, prev_lower_band
-    )
-    upper_band = np.where(
-        (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
-        upper_band, prev_upper_band
-    )
+    if prev_upper_band is not None and prev_lower_band is not None:
+        lower_band = np.where(
+            (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
+            lower_band, prev_lower_band
+        )
+        upper_band = np.where(
+            (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
+            upper_band, prev_upper_band
+        )
 
-    # Calculate direction
-    if prev_supertrend == prev_upper_band:
-        direction = -1 if close.iloc[-1] > upper_band[-1] else 1
+    # Calculate direction based on current price
+    if close.iloc[-1] > upper_band[-1]:
+        direction = -1
+    elif close.iloc[-1] < lower_band[-1]:
+        direction = 1
     else:
-        direction = 1 if close.iloc[-1] < lower_band[-1] else -1
+        direction = prev_supertrend
 
     supertrend = lower_band[-1] if direction == 1 else upper_band[-1]
+    
+    # Log values for debugging
+    logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band[-1]}, Lower Band: {lower_band[-1]}, Direction: {direction}")
+    
     return supertrend, direction, upper_band[-1], lower_band[-1]
 
 # Execute a Trade
@@ -131,13 +130,9 @@ def trading_bot():
                 high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
             )
 
-            logging.info(f"SuperTrend: {supertrend_value}, Direction: {direction}")
-            logging.info(f"Upper Band: {upper_band}, Lower Band: {lower_band}")
-
             if not initialized:
                 initialized = True
                 last_signal = "buy" if direction == 1 else "sell"
-                logging.info(f"Initialization complete. First signal: {last_signal}")
                 continue
 
             if last_signal == "sell" and direction == 1:
@@ -158,6 +153,7 @@ def trading_bot():
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     trading_bot()
+
 
 
 
