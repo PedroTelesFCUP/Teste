@@ -7,42 +7,38 @@ from flask import Flask
 from threading import Thread
 from binance.client import Client
 
-# Binance API Credentials (read from environment variables)
+# Binance API Credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY")
-
-# Initialize Binance Client
 binance_client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 
-# Parameters for SuperTrend
+# Parameters
 ATR_LEN = 10
-ATR_FACTOR = 3.0  # Default value, dynamically adjusted
+ATR_FACTOR = 3.0
 SYMBOL = "BTC/USD"
 BINANCE_SYMBOL = "BTCUSDT"
-QUANTITY = round(0.001, 8)  # Adjust for fractional trading
+QUANTITY = round(0.001, 8)
 
-# Configure Logging
+# Logging Configuration
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logging.info("Trading bot initialized.")
 
-# Flask Web Server for Uptime Monitoring
+# Flask Server
 app = Flask(__name__)
-
 @app.route("/")
 def home():
     return "Bot is running!", 200
 
-# Global variables
+# Globals
 last_price = None
 last_signal = None
 initialized = False
 atr_values = []
-volatility_window = 100  # Lookback period for volatility classification
 
-# Fetch real-time BTC/USD price using Binance
+# Fetch Real-Time Price
 def fetch_realtime_price():
     try:
         ticker = binance_client.get_symbol_ticker(symbol=BINANCE_SYMBOL)
@@ -50,31 +46,28 @@ def fetch_realtime_price():
         logging.info(f"Real-time BTC/USD price: {price}")
         return price
     except Exception as e:
-        logging.error(f"Error fetching real-time price from Binance: {e}")
+        logging.error(f"Error fetching real-time price: {e}")
         return None
 
-# Fetch historical market data using Binance
-def fetch_historical_data(symbol=BINANCE_SYMBOL, interval="1m", limit=ATR_LEN + 1):
+# Fetch Historical Data
+def fetch_historical_data():
     try:
-        klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        data = pd.DataFrame(klines, columns=[
-            "open_time", "open", "high", "low", "close", "volume", "close_time", 
-            "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume",
-            "taker_buy_quote_asset_volume", "ignore"
-        ])
+        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=ATR_LEN + 1)
+        data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
+                                             "close_time", "quote_asset_volume", "number_of_trades",
+                                             "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
         return data["high"].astype(float), data["low"].astype(float), data["close"].astype(float)
     except Exception as e:
-        logging.error(f"Error fetching historical data from Binance: {e}")
+        logging.error(f"Error fetching historical data: {e}")
         return None, None, None
 
-# Calculate Average True Range (ATR)
+# Calculate ATR
 def calculate_atr(high, low, close):
     tr1 = high - low
     tr2 = abs(high - close.shift(1))
     tr3 = abs(low - close.shift(1))
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(window=ATR_LEN).mean()
-    return atr.iloc[-1]
+    return tr.rolling(window=ATR_LEN).mean().iloc[-1]
 
 # Calculate SuperTrend
 def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend):
@@ -82,22 +75,15 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
-    # Validate and set default for previous bands
-    if prev_upper_band is None:
-        prev_upper_band = upper_band.iloc[-1] if not upper_band.empty else hl2.iloc[-1]
-    if prev_lower_band is None:
-        prev_lower_band = lower_band.iloc[-1] if not lower_band.empty else hl2.iloc[-1]
-    if prev_supertrend is None:
-        prev_supertrend = lower_band.iloc[-1] if close.iloc[-1] < hl2.iloc[-1] else upper_band.iloc[-1]
-
-    lower_band = np.where(
-        (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
-        lower_band, prev_lower_band
-    )
-    upper_band = np.where(
-        (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
-        upper_band, prev_upper_band
-    )
+    if prev_upper_band is not None and prev_lower_band is not None:
+        lower_band = np.where(
+            (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
+            lower_band, prev_lower_band
+        )
+        upper_band = np.where(
+            (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
+            upper_band, prev_upper_band
+        )
 
     if prev_supertrend == prev_upper_band:
         direction = -1 if close.iloc[-1] > upper_band[-1] else 1
@@ -107,11 +93,11 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     supertrend = lower_band[-1] if direction == 1 else upper_band[-1]
     return supertrend, direction, upper_band[-1], lower_band[-1]
 
-# Execute a trade
+# Execute a Trade
 def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
 
-# Main trading bot logic
+# Main Trading Bot
 def trading_bot():
     global last_price, last_signal, initialized, atr_values
 
@@ -121,82 +107,50 @@ def trading_bot():
 
     while True:
         try:
-            logging.info("Fetching real-time BTC/USD price...")
-            latest_price = fetch_realtime_price()
-            if latest_price is None:
-                logging.warning("Failed to fetch price. Retrying...")
+            price = fetch_realtime_price()
+            if price is None:
                 time.sleep(60)
                 continue
 
-            logging.info("Fetching historical data...")
             high, low, close = fetch_historical_data()
             if high is None or low is None or close is None:
-                logging.error("Historical data is missing. Skipping this cycle.")
                 time.sleep(60)
                 continue
 
-            logging.info("Calculating ATR...")
             atr = calculate_atr(high, low, close)
             if atr is None or np.isnan(atr):
-                logging.error("ATR value is None or NaN. Skipping this cycle.")
                 time.sleep(60)
                 continue
-            logging.info(f"Calculated ATR: {atr}")
 
-            atr_values.append(atr)
-            if len(atr_values) > volatility_window:
-                atr_values.pop(0)
-
-            logging.info("Calculating SuperTrend...")
             supertrend_value, direction, upper_band, lower_band = calculate_supertrend(
                 high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
             )
-            logging.info(f"SuperTrend Value: {supertrend_value}")
-            logging.info(f"Upper Band: {upper_band}, Lower Band: {lower_band}")
-            logging.info(f"Current Direction: {direction}")
-            logging.info(f"Real-time BTC/USD price: {latest_price}")
 
-            # Initialize the first signal and wait for a change
+            logging.info(f"SuperTrend Value: {supertrend_value}, Direction: {direction}")
+            logging.info(f"Upper Band: {upper_band}, Lower Band: {lower_band}")
+
             if not initialized:
                 initialized = True
                 last_signal = "buy" if direction == 1 else "sell"
-                logging.info(f"Initialization complete. First signal set to: {last_signal}")
-                prev_upper_band = supertrend_value if direction == -1 else prev_upper_band
-                prev_lower_band = supertrend_value if direction == 1 else prev_lower_band
-                prev_supertrend = supertrend_value
-                time.sleep(60)
                 continue
 
-            # Execute trades on valid signal change
             if last_signal == "sell" and direction == 1:
-                logging.info("Buy signal triggered. Executing buy trade.")
                 execute_trade(SYMBOL, QUANTITY, "buy")
                 last_signal = "buy"
             elif last_signal == "buy" and direction == -1:
-                logging.info("Sell signal triggered. Executing sell trade.")
                 execute_trade(SYMBOL, QUANTITY, "sell")
                 last_signal = "sell"
-            else:
-                logging.info(f"No valid signal change detected. Last signal: {last_signal}, Current direction: {direction}")
 
-            # Update previous bands and SuperTrend
-            prev_upper_band = upper_band
-            prev_lower_band = lower_band
-            prev_supertrend = supertrend_value
-
+            prev_upper_band, prev_lower_band, prev_supertrend = upper_band, lower_band, supertrend_value
             time.sleep(60)
 
         except Exception as e:
-            logging.error(f"Error in trading bot: {e}", exc_info=True)
+            logging.error(f"Error in trading bot: {e}")
             time.sleep(60)
 
-# Run Flask Web Server and Trading Bot
+# Run Flask and Trading Bot
 if __name__ == "__main__":
-    thread = Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
-    thread.daemon = True
-    thread.start()
-
+    Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     trading_bot()
-
 
 
