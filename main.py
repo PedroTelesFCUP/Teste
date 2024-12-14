@@ -36,6 +36,11 @@ logging.basicConfig(
 )
 logging.info("Trading bot initialized.")
 
+# Global Variables
+volatility = []  # Initialize volatility list
+last_price = None
+last_direction = 0
+
 # Flask Server
 app = Flask(__name__)
 @app.route("/")
@@ -100,13 +105,13 @@ def initialize_volatility_from_history():
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = tr.rolling(window=ATR_LEN).mean()
 
-        # Return the last 100 ATR values as volatility
+        # Populate the global volatility list
+        global volatility
         volatility = atr[-100:].dropna().tolist()
         logging.info(f"Initialized volatility with {len(volatility)} historical ATR values.")
-        return volatility
     except Exception as e:
         logging.error(f"Error initializing volatility: {e}")
-        return []
+        volatility = []  # Ensure volatility is still defined
 
 # Calculate SuperTrend
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
@@ -182,6 +187,10 @@ def execute_trade(symbol, quantity, side):
 def calculate_and_execute(price):
     global last_direction
 
+    if not volatility or len(volatility) < 3:  # Ensure there’s enough data for clustering
+        logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
+        return
+
     # Perform clustering and SuperTrend calculation
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
     if assigned_centroid is None:
@@ -192,10 +201,7 @@ def calculate_and_execute(price):
         high, low, close, assigned_centroid
     )
 
-    # Log details
-    logging.info(f"Price: {price}, SuperTrend: {supertrend}, Direction: {direction}")
-
-    # Handle signal changes
+    # Handle signal changes and execute trades
     if last_direction == 0 and direction in [1, -1]:
         trade_type = "buy" if direction == 1 else "sell"
         execute_trade(ALPACA_SYMBOL, QUANTITY, trade_type)
@@ -208,6 +214,7 @@ def calculate_and_execute(price):
 
 # Start Flask and WebSocket
 if __name__ == "__main__":
+    initialize_volatility_from_history()  # Populate volatility before WebSocket starts
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     start_websocket()
 
