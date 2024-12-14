@@ -37,18 +37,33 @@ def home():
 def cluster_volatility(volatility, n_clusters=3):
     if len(volatility) < n_clusters:
         logging.error("Not enough data points for clustering. Skipping.")
-        return None, None, None
+        return None, None, None, None
+
     try:
         volatility = np.array(volatility).reshape(-1, 1)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
+
+        # Centroids and cluster assignments
         centroids = kmeans.cluster_centers_.flatten()
-        assigned_cluster = kmeans.predict([[volatility[-1][0]]])[0]
+        labels = kmeans.labels_
+
+        # Assign the latest volatility value to a cluster
+        latest_volatility = volatility[-1][0]
+        assigned_cluster = kmeans.predict([[latest_volatility]])[0]
         assigned_centroid = centroids[assigned_cluster]
-        return centroids, assigned_cluster, assigned_centroid
+
+        # Calculate cluster sizes
+        cluster_sizes = [np.sum(labels == i) for i in range(n_clusters)]
+
+        # Calculate volatility level
+        volatility_level = assigned_cluster + 1  # Pine uses 1-based indexing
+
+        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level
     except Exception as e:
         logging.error(f"Clustering failed: {e}")
-        return None, None, None
+        return None, None, None, None, None
+
 
 # Calculate ATR
 def calculate_atr(high, low, close):
@@ -154,7 +169,6 @@ def initialize_volatility_from_history():
 
 def trading_bot():
     global last_direction
-    # Initialize volatility using historical data
     volatility = initialize_volatility_from_history()
     last_direction = 0
 
@@ -176,13 +190,13 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
-            # Add the latest ATR value to volatility
+            # Add ATR to volatility
             volatility.append(atr)
-            if len(volatility) > 100:  # Limit history to the last 100 values
+            if len(volatility) > 100:  # Limit to the last 100 values
                 volatility.pop(0)
 
-            # Cluster Volatility
-            centroids, assigned_cluster, assigned_centroid = cluster_volatility(volatility)
+            # Perform clustering
+            centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
             if assigned_centroid is None:
                 logging.warning("Clustering failed. Skipping cycle.")
                 time.sleep(60)
@@ -198,6 +212,9 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
+            # Log detailed information
+            logging.info(f"ATR: {atr}, Volatility Level: {volatility_level}")
+            logging.info(f"Cluster Centroid: {assigned_centroid}, Cluster Sizes: {cluster_sizes}")
             logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
 
             # Execute trade if signal changes
@@ -216,6 +233,7 @@ def trading_bot():
         except Exception as e:
             logging.error(f"Error in trading bot: {e}", exc_info=True)
             time.sleep(60)
+
 
 # Run Flask and Trading Bot
 if __name__ == "__main__":
