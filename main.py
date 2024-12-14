@@ -60,38 +60,43 @@ def calculate_atr(high, low, close):
 
 # Calculate SuperTrend using cluster-based ATR
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
+    # Validate inputs
     if len(high) == 0 or len(low) == 0 or len(close) == 0:
         logging.error("Insufficient market data for SuperTrend calculation. Skipping.")
         return None, None, None, None
+
     if assigned_centroid is None:
-        logging.error("Invalid centroid. Skipping SuperTrend calculation.")
+        logging.error("Invalid centroid from clustering. Skipping SuperTrend calculation.")
         return None, None, None, None
 
-    hl2 = (high + low) / 2
-    upper_band = hl2 + ATR_FACTOR * assigned_centroid
-    lower_band = hl2 - ATR_FACTOR * assigned_centroid
+    try:
+        hl2 = (high + low) / 2
+        upper_band = hl2 + ATR_FACTOR * assigned_centroid
+        lower_band = hl2 - ATR_FACTOR * assigned_centroid
 
-    # Determine direction
-    if close.iloc[-1] > upper_band.iloc[-1]:
-        direction = -1  # Bearish
-    elif close.iloc[-1] < lower_band.iloc[-1]:
-        direction = 1  # Bullish
-    else:
-        direction = 0  # Neutral
+        # Determine direction
+        if close.iloc[-1] > upper_band.iloc[-1]:
+            direction = -1  # Bearish
+        elif close.iloc[-1] < lower_band.iloc[-1]:
+            direction = 1  # Bullish
+        else:
+            direction = 0  # Neutral
 
-    # Assign SuperTrend based on direction
-    if direction == 1:
-        supertrend = lower_band.iloc[-1]
-    elif direction == -1:
-        supertrend = upper_band.iloc[-1]
-    else:
-        logging.info("Neutral direction. No SuperTrend update.")
-        supertrend = None
+        # Assign SuperTrend based on direction
+        if direction == 1:
+            supertrend = lower_band.iloc[-1]
+        elif direction == -1:
+            supertrend = upper_band.iloc[-1]
+        else:
+            supertrend = None
+            logging.info("Neutral direction. SuperTrend is None. No action required.")
 
-    # Log for debugging
-    logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
+        return supertrend, direction, upper_band, lower_band
 
-    return supertrend, direction, upper_band, lower_band
+    except Exception as e:
+        logging.error(f"Unexpected error in SuperTrend calculation: {e}", exc_info=True)
+        return None, None, None, None
+
 
 
 # Fetch Real-Time Price
