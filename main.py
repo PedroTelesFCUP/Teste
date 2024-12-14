@@ -5,8 +5,16 @@ import pandas as pd
 import logging
 from flask import Flask
 from threading import Thread
+from binance import ThreadedWebsocketManager
 from binance.client import Client
 from sklearn.cluster import KMeans
+from alpaca_trade_api.rest import REST  # Alpaca API
+
+# Alpaca API Credentials
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # Use paper trading endpoint
+alpaca_api = REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 
 # Binance API Credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
@@ -17,6 +25,7 @@ binance_client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 ATR_LEN = 10
 ATR_FACTOR = 3.0
 SYMBOL = "BTC/USD"
+ALPACA_SYMBOL = SYMBOL.replace("/", "")  # Alpaca doesn't use "/"
 BINANCE_SYMBOL = "BTCUSDT"
 QUANTITY = round(0.001, 8)
 
@@ -53,7 +62,7 @@ def cluster_volatility(volatility, n_clusters=3):
         assigned_cluster = kmeans.predict([[latest_volatility]])[0]
         assigned_centroid = centroids[assigned_cluster]
 
-        # Calculate cluster sizes and convert to standard Python integers
+        # Calculate cluster sizes
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
 
         # Calculate volatility level
@@ -63,7 +72,6 @@ def cluster_volatility(volatility, n_clusters=3):
     except Exception as e:
         logging.error(f"Clustering failed: {e}")
         return None, None, None, None, None
-
 
 # Calculate ATR
 def calculate_atr(high, low, close):
@@ -136,97 +144,71 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
 
     return supertrend, direction, upper_band, lower_band
 
-# Fetch Real-Time Price
-def fetch_realtime_price():
-    try:
-        ticker = binance_client.get_symbol_ticker(symbol=BINANCE_SYMBOL)
-        return float(ticker["price"])
-    except Exception as e:
-        logging.error(f"Error fetching real-time price: {e}")
-        return None
+# WebSocket Handler
+def on_message(msg):
+    global last_price
+    last_price = float(msg['k']['c'])  # Closing price from candlestick data
 
-# Fetch Historical Data
-def fetch_historical_data():
-    try:
-        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=ATR_LEN + 1)
-        data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
-                                             "close_time", "quote_asset_volume", "number_of_trades",
-                                             "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
-        return data["high"].astype(float), data["low"].astype(float), data["close"].astype(float)
-    except Exception as e:
-        logging.error(f"Error fetching historical data: {e}")
-        return None, None, None
+    # Perform real-time SuperTrend calculation
+    calculate_and_execute(last_price)
 
-# Main Trading Bot
-def trading_bot():
+def start_websocket():
+    """Starts the Binance WebSocket for real-time price data."""
+    try:
+        twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+        twm.start()
+        twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
+        twm.join()
+    except Exception as e:
+        logging.error(f"WebSocket connection failed: {e}")
+        raise
+
+# Execute a Trade
+def execute_trade(symbol, quantity, side):
+    try:
+        logging.info(f"Submitting {side} order for {quantity} {symbol}.")
+        alpaca_api.submit_order(
+            symbol=symbol,
+            qty=quantity,
+            side=side,
+            type="market",
+            time_in_force="gtc"
+        )
+        logging.info(f"{side.capitalize()} order submitted successfully.")
+    except Exception as e:
+        logging.error(f"Error executing {side} order: {e}")
+
+# Calculate and Execute Trades
+def calculate_and_execute(price):
     global last_direction
-    volatility = initialize_volatility_from_history()
-    last_direction = 0
 
-    while True:
-        try:
-            price = fetch_realtime_price()
-            if price is None:
-                time.sleep(60)
-                continue
+    # Perform clustering and SuperTrend calculation
+    centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
+    if assigned_centroid is None:
+        logging.warning("Clustering failed. Skipping cycle.")
+        return
 
-            high, low, close = fetch_historical_data()
-            if high is None or low is None or close is None:
-                time.sleep(60)
-                continue
+    supertrend, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
+        high, low, close, assigned_centroid
+    )
 
-            atr = calculate_atr(high, low, close)
-            if atr is None or np.isnan(atr):
-                logging.warning("ATR calculation failed. Skipping cycle.")
-                time.sleep(60)
-                continue
+    # Log details
+    logging.info(f"Price: {price}, SuperTrend: {supertrend}, Direction: {direction}")
 
-            # Add ATR to volatility
-            volatility.append(atr)
-            if len(volatility) > 100:  # Limit to the last 100 values
-                volatility.pop(0)
+    # Handle signal changes
+    if last_direction == 0 and direction in [1, -1]:
+        trade_type = "buy" if direction == 1 else "sell"
+        execute_trade(ALPACA_SYMBOL, QUANTITY, trade_type)
+    elif last_direction == 1 and direction == -1:
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
+    elif last_direction == -1 and direction == 1:
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
 
-            # Perform clustering
-            centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
-            if assigned_centroid is None:
-                logging.warning("Clustering failed. Skipping cycle.")
-                time.sleep(60)
-                continue
+    last_direction = direction
 
-            # Calculate SuperTrend
-            supertrend, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
-                high, low, close, assigned_centroid
-            )
-
-            # Log all values, including skipped cycles
-            logging.info(f"ATR: {atr}, Volatility Level: {volatility_level}")
-            logging.info(f"Cluster Centroid: {assigned_centroid}, Cluster Sizes: {cluster_sizes}")
-            logging.info(f"BTC Price: {close.iloc[-1]}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
-
-            # Handle SuperTrend being None
-            if supertrend is None and direction == 0:
-                logging.info("Neutral direction. Waiting for signal change.")
-                time.sleep(60)
-                continue
-
-            # Execute trade if signal changes
-            if last_direction == 0 and direction in [1, -1]:
-                trade_type = "buy" if direction == 1 else "sell"
-                execute_trade(SYMBOL, QUANTITY, trade_type)
-            elif last_direction == 1 and direction == -1:
-                execute_trade(SYMBOL, QUANTITY, "sell")
-            elif last_direction == -1 and direction == 1:
-                execute_trade(SYMBOL, QUANTITY, "buy")
-
-            # Update last direction
-            last_direction = direction
-            time.sleep(60)
-
-        except Exception as e:
-            logging.error(f"Error in trading bot: {e}", exc_info=True)
-            time.sleep(60)
-
+# Start Flask and WebSocket
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
-    trading_bot()
+    start_websocket()
+
 
