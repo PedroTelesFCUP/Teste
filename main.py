@@ -40,6 +40,7 @@ logging.info("Trading bot initialized.")
 volatility = []  # Initialize volatility list
 last_price = None
 last_direction = 0
+high, low, close = [], [], []  # Historical data buffers for real-time updates
 
 # Flask Server
 app = Flask(__name__)
@@ -86,32 +87,32 @@ def calculate_atr(high, low, close):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(window=ATR_LEN).mean().iloc[-1]
 
-# Initialize Volatility from Historical Data
-def initialize_volatility_from_history():
-    """Fetch historical data and calculate ATR values to initialize volatility."""
+# Initialize Volatility and Historical Data
+def initialize_historical_data():
+    """Fetch historical data and calculate ATR values to initialize volatility and price buffers."""
+    global high, low, close, volatility
     try:
         klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
         data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
                                              "close_time", "quote_asset_volume", "number_of_trades",
                                              "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
-        high = data["high"].astype(float)
-        low = data["low"].astype(float)
-        close = data["close"].astype(float)
+        high = data["high"].astype(float).tolist()
+        low = data["low"].astype(float).tolist()
+        close = data["close"].astype(float).tolist()
 
         # Calculate ATR for historical data
-        tr1 = high - low
-        tr2 = abs(high - close.shift(1))
-        tr3 = abs(low - close.shift(1))
+        tr1 = data["high"].astype(float) - data["low"].astype(float)
+        tr2 = abs(data["high"].astype(float) - data["close"].shift(1).astype(float))
+        tr3 = abs(data["low"].astype(float) - data["close"].shift(1).astype(float))
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = tr.rolling(window=ATR_LEN).mean()
 
         # Populate the global volatility list
-        global volatility
         volatility = atr[-100:].dropna().tolist()
-        logging.info(f"Initialized volatility with {len(volatility)} historical ATR values.")
+        logging.info(f"Initialized historical data with {len(close)} entries and {len(volatility)} ATR values.")
     except Exception as e:
-        logging.error(f"Error initializing volatility: {e}")
-        volatility = []  # Ensure volatility is still defined
+        logging.error(f"Error initializing historical data: {e}")
+        high, low, close, volatility = [], [], [], []
 
 # Calculate SuperTrend
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
@@ -151,22 +152,42 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price
-    last_price = float(msg['k']['c'])  # Closing price from candlestick data
+    global last_price, high, low, close
 
-    # Perform real-time SuperTrend calculation
-    calculate_and_execute(last_price)
+    try:
+        candle = msg['k']
+        last_price = float(candle['c'])  # Closing price
+        high.append(float(candle['h']))
+        low.append(float(candle['l']))
+        close.append(float(candle['c']))
 
+        # Ensure lists don't grow indefinitely (keep only the last ATR_LEN + 1 entries)
+        if len(high) > ATR_LEN + 1:
+            high.pop(0)
+        if len(low) > ATR_LEN + 1:
+            low.pop(0)
+        if len(close) > ATR_LEN + 1:
+            close.pop(0)
+
+        # Perform real-time SuperTrend calculation
+        calculate_and_execute(last_price)
+    except Exception as e:
+        logging.error(f"Error processing WebSocket message: {e}")
+
+# Robust WebSocket Start
 def start_websocket():
     """Starts the Binance WebSocket for real-time price data."""
-    try:
-        twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
-        twm.start()
-        twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
-        twm.join()
-    except Exception as e:
-        logging.error(f"WebSocket connection failed: {e}")
-        raise
+    while True:  # Keep the WebSocket running
+        try:
+            logging.info("Starting WebSocket connection...")
+            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+            twm.start()
+            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
+            twm.join()  # Keep the WebSocket open
+        except Exception as e:
+            logging.error(f"WebSocket connection failed: {e}")
+            logging.info("Reconnecting in 5 seconds...")
+            time.sleep(5)  # Wait before reconnecting
 
 # Execute a Trade
 def execute_trade(symbol, quantity, side):
@@ -198,7 +219,7 @@ def calculate_and_execute(price):
         return
 
     supertrend, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
-        high, low, close, assigned_centroid
+        pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
     # Handle signal changes and execute trades
@@ -214,8 +235,9 @@ def calculate_and_execute(price):
 
 # Start Flask and WebSocket
 if __name__ == "__main__":
-    initialize_volatility_from_history()  # Populate volatility before WebSocket starts
+    initialize_historical_data()  # Initialize historical data before WebSocket starts
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     start_websocket()
+
 
 
