@@ -34,7 +34,6 @@ def home():
 
 # Globals
 last_signal = None
-initialized = False
 
 # Fetch Real-Time Price
 def fetch_realtime_price():
@@ -71,23 +70,18 @@ def calculate_supertrend(high, low, close, atr):
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
-    # Ensure bands are not empty
-    if upper_band.empty or lower_band.empty:
-        logging.error("Bands are empty. Skipping this cycle.")
-        return None, None, None, None
-
-    # Validate length of bands and close before accessing
+    # Validate bands
     if len(upper_band) == 0 or len(lower_band) == 0 or len(close) == 0:
         logging.error("Insufficient data for bands or close. Skipping this cycle.")
         return None, None, None, None
 
-    # Calculate direction based on price vs bands
+    # Determine direction based on price vs bands
     if close.iloc[-1] > upper_band.iloc[-1]:
         direction = -1  # Bearish
     elif close.iloc[-1] < lower_band.iloc[-1]:
         direction = 1  # Bullish
     else:
-        direction = 0  # Neutral (price is within bands)
+        direction = 0  # Neutral
 
     supertrend = lower_band.iloc[-1] if direction == 1 else upper_band.iloc[-1]
 
@@ -102,7 +96,7 @@ def execute_trade(symbol, quantity, side):
 
 # Main Trading Bot
 def trading_bot():
-    global last_signal, initialized
+    global last_signal
 
     while True:
         try:
@@ -130,12 +124,23 @@ def trading_bot():
                 time.sleep(60)
                 continue
 
-            if not initialized:
-                initialized = True
-                last_signal = "buy" if direction == 1 else "sell"
-                logging.info(f"Initialization complete. First signal: {last_signal}")
+            # Log details for debugging
+            logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend_value}, Upper Band: {upper_band}, Lower Band: {lower_band}, Direction: {direction}")
+
+            # Skip neutral direction and wait for the first valid signal
+            if direction == 0:
+                logging.info("Neutral state detected. Waiting for a valid signal.")
+                time.sleep(60)
                 continue
 
+            # Execute the first valid trade
+            if last_signal is None:
+                last_signal = "buy" if direction == 1 else "sell"
+                logging.info(f"First signal detected. Executing initial trade: {last_signal}")
+                execute_trade(SYMBOL, QUANTITY, last_signal)
+                continue
+
+            # Execute trade if the signal changes
             if last_signal == "sell" and direction == 1:
                 execute_trade(SYMBOL, QUANTITY, "buy")
                 last_signal = "buy"
@@ -153,6 +158,5 @@ def trading_bot():
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     trading_bot()
-
 
 
