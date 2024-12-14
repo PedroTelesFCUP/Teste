@@ -2,5 +2,6 @@ flask
 alpaca-trade-api
 pandas
 numpy
+binance
 python-binance
 scikit-learn
