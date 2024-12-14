@@ -30,10 +30,11 @@ BINANCE_SYMBOL = "BTCUSDT"
 QUANTITY = round(0.001, 8)
 
 # Logging Configuration
-logging.basicConfig(
-    level=logging.DEBUG,
+llogging.basicConfig(
+    level=logging.INFO,  # Change from DEBUG to INFO
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
 logging.info("Trading bot initialized.")
 
 # Global Variables
