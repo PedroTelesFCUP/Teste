@@ -155,6 +155,11 @@ def on_message(msg):
     global last_price, high, low, close
 
     try:
+        # Ensure the message contains the 'k' key (candlestick data)
+        if 'k' not in msg:
+            logging.warning(f"Received unexpected message format: {msg}")
+            return
+
         # Extract price data from WebSocket message
         candle = msg['k']
         last_price = float(candle['c'])  # Closing price
