@@ -30,7 +30,7 @@ BINANCE_SYMBOL = "BTCUSDT"
 QUANTITY = round(0.001, 8)
 
 # Logging Configuration
-llogging.basicConfig(
+logging.basicConfig(
     level=logging.INFO,  # Change from DEBUG to INFO
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
