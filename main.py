@@ -71,6 +71,7 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     upper_band = hl2 + ATR_FACTOR * assigned_centroid
     lower_band = hl2 - ATR_FACTOR * assigned_centroid
 
+    # Determine direction
     if close.iloc[-1] > upper_band.iloc[-1]:
         direction = -1  # Bearish
     elif close.iloc[-1] < lower_band.iloc[-1]:
@@ -78,8 +79,20 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     else:
         direction = 0  # Neutral
 
-    supertrend = lower_band.iloc[-1] if direction == 1 else upper_band.iloc[-1]
+    # Assign SuperTrend based on direction
+    if direction == 1:
+        supertrend = lower_band.iloc[-1]
+    elif direction == -1:
+        supertrend = upper_band.iloc[-1]
+    else:
+        logging.info("Neutral direction. No SuperTrend update.")
+        supertrend = None
+
+    # Log for debugging
+    logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
+
     return supertrend, direction, upper_band, lower_band
+
 
 # Fetch Real-Time Price
 def fetch_realtime_price():
