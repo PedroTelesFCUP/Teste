@@ -173,8 +173,8 @@ def on_message(msg):
         # Perform real-time SuperTrend calculation
         calculate_and_execute(last_price)
 
-        # Wait for 3 seconds to avoid exceeding API limits
-        time.sleep(3)
+        # Wait for 10 seconds to avoid exceeding API limits
+        time.sleep(10)
     except Exception as e:
         logging.error(f"Error processing WebSocket message: {e}", exc_info=True)
 
