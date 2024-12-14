@@ -109,7 +109,7 @@ def execute_trade(symbol, quantity, side):
 # Main Trading Bot
 def trading_bot():
     global last_direction
-    volatility = []
+    volatility = []  # Stores ATR values
     last_direction = 0
 
     while True:
@@ -126,13 +126,20 @@ def trading_bot():
 
             atr = calculate_atr(high, low, close)
             if atr is None or np.isnan(atr):
+                logging.warning("ATR calculation failed. Skipping cycle.")
                 time.sleep(60)
                 continue
 
             # Add ATR to volatility list
             volatility.append(atr)
-            if len(volatility) > 100:  # Limit volatility history size
+            if len(volatility) > 100:  # Limit history to the last 100 values
                 volatility.pop(0)
+
+            # Ensure sufficient data points for clustering
+            if len(volatility) < 3:  # Require at least 3 points (or n_clusters)
+                logging.warning("Insufficient data for clustering. Waiting for more data.")
+                time.sleep(60)
+                continue
 
             # Cluster Volatility
             centroids, assigned_cluster, assigned_centroid = cluster_volatility(volatility)
@@ -169,6 +176,7 @@ def trading_bot():
         except Exception as e:
             logging.error(f"Error in trading bot: {e}", exc_info=True)
             time.sleep(60)
+
 
 # Run Flask and Trading Bot
 if __name__ == "__main__":
