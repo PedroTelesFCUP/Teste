@@ -33,18 +33,14 @@ def home():
     return "Bot is running!", 200
 
 # Globals
-last_price = None
 last_signal = None
 initialized = False
-atr_values = []
 
 # Fetch Real-Time Price
 def fetch_realtime_price():
     try:
         ticker = binance_client.get_symbol_ticker(symbol=BINANCE_SYMBOL)
-        price = float(ticker["price"])
-        logging.info(f"Real-time BTC/USD price: {price}")
-        return price
+        return float(ticker["price"])
     except Exception as e:
         logging.error(f"Error fetching real-time price: {e}")
         return None
@@ -75,16 +71,25 @@ def calculate_supertrend(high, low, close, atr, prev_upper_band, prev_lower_band
     upper_band = hl2 + ATR_FACTOR * atr
     lower_band = hl2 - ATR_FACTOR * atr
 
-    if prev_upper_band is not None and prev_lower_band is not None:
-        lower_band = np.where(
-            (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
-            lower_band, prev_lower_band
-        )
-        upper_band = np.where(
-            (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
-            upper_band, prev_upper_band
-        )
+    # Validate previous bands
+    if prev_upper_band is None:
+        prev_upper_band = upper_band.iloc[-1] if len(upper_band) > 0 else hl2.iloc[-1]
+    if prev_lower_band is None:
+        prev_lower_band = lower_band.iloc[-1] if len(lower_band) > 0 else hl2.iloc[-1]
+    if prev_supertrend is None:
+        prev_supertrend = lower_band.iloc[-1] if close.iloc[-1] < hl2.iloc[-1] else upper_band.iloc[-1]
 
+    # Adjust bands based on previous values
+    lower_band = np.where(
+        (lower_band > prev_lower_band) | (close.shift(1) < prev_lower_band),
+        lower_band, prev_lower_band
+    )
+    upper_band = np.where(
+        (upper_band < prev_upper_band) | (close.shift(1) > prev_upper_band),
+        upper_band, prev_upper_band
+    )
+
+    # Calculate direction
     if prev_supertrend == prev_upper_band:
         direction = -1 if close.iloc[-1] > upper_band[-1] else 1
     else:
@@ -99,7 +104,7 @@ def execute_trade(symbol, quantity, side):
 
 # Main Trading Bot
 def trading_bot():
-    global last_price, last_signal, initialized, atr_values
+    global last_signal, initialized
 
     prev_upper_band = None
     prev_lower_band = None
@@ -126,12 +131,13 @@ def trading_bot():
                 high, low, close, atr, prev_upper_band, prev_lower_band, prev_supertrend
             )
 
-            logging.info(f"SuperTrend Value: {supertrend_value}, Direction: {direction}")
+            logging.info(f"SuperTrend: {supertrend_value}, Direction: {direction}")
             logging.info(f"Upper Band: {upper_band}, Lower Band: {lower_band}")
 
             if not initialized:
                 initialized = True
                 last_signal = "buy" if direction == 1 else "sell"
+                logging.info(f"Initialization complete. First signal: {last_signal}")
                 continue
 
             if last_signal == "sell" and direction == 1:
@@ -145,12 +151,13 @@ def trading_bot():
             time.sleep(60)
 
         except Exception as e:
-            logging.error(f"Error in trading bot: {e}")
+            logging.error(f"Error in trading bot: {e}", exc_info=True)
             time.sleep(60)
 
 # Run Flask and Trading Bot
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     trading_bot()
+
 
 
