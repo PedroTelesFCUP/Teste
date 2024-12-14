@@ -64,7 +64,6 @@ def cluster_volatility(volatility, n_clusters=3):
         logging.error(f"Clustering failed: {e}")
         return None, None, None, None, None
 
-
 # Calculate ATR
 def calculate_atr(high, low, close):
     tr1 = high - low
@@ -75,7 +74,6 @@ def calculate_atr(high, low, close):
 
 # Calculate SuperTrend using cluster-based ATR
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
-    # Validate inputs
     if len(high) == 0 or len(low) == 0 or len(close) == 0:
         logging.error("Insufficient market data for SuperTrend calculation. Skipping.")
         return None, None, None, None
@@ -84,35 +82,31 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         logging.error("Invalid centroid from clustering. Skipping SuperTrend calculation.")
         return None, None, None, None
 
-    try:
-        hl2 = (high + low) / 2
-        upper_band = hl2 + ATR_FACTOR * assigned_centroid
-        lower_band = hl2 - ATR_FACTOR * assigned_centroid
+    hl2 = (high + low) / 2
+    upper_band = hl2 + ATR_FACTOR * assigned_centroid
+    lower_band = hl2 - ATR_FACTOR * assigned_centroid
 
-        # Determine direction
-        if close.iloc[-1] > upper_band.iloc[-1]:
-            direction = -1  # Bearish
-        elif close.iloc[-1] < lower_band.iloc[-1]:
-            direction = 1  # Bullish
-        else:
-            direction = 0  # Neutral
+    # Determine direction
+    if close.iloc[-1] > upper_band.iloc[-1]:
+        direction = -1  # Bearish
+        logging.info(f"Direction: Bearish (-1). Price ({close.iloc[-1]}) > Upper Band ({upper_band.iloc[-1]}).")
+    elif close.iloc[-1] < lower_band.iloc[-1]:
+        direction = 1  # Bullish
+        logging.info(f"Direction: Bullish (1). Price ({close.iloc[-1]}) < Lower Band ({lower_band.iloc[-1]}).")
+    else:
+        direction = 0  # Neutral
+        logging.info(f"Direction: Neutral (0). Price ({close.iloc[-1]}) within bands: Lower Band ({lower_band.iloc[-1]}), Upper Band ({upper_band.iloc[-1]}).")
 
-        # Assign SuperTrend based on direction
-        if direction == 1:
-            supertrend = lower_band.iloc[-1]
-        elif direction == -1:
-            supertrend = upper_band.iloc[-1]
-        else:
-            supertrend = None
-            logging.info("Neutral direction. SuperTrend is None. No action required.")
+    # Assign SuperTrend based on direction
+    if direction == 1:
+        supertrend = lower_band.iloc[-1]
+    elif direction == -1:
+        supertrend = upper_band.iloc[-1]
+    else:
+        supertrend = None
+        logging.info("Neutral direction. SuperTrend is None. No action required.")
 
-        return supertrend, direction, upper_band, lower_band
-
-    except Exception as e:
-        logging.error(f"Unexpected error in SuperTrend calculation: {e}", exc_info=True)
-        return None, None, None, None
-
-
+    return supertrend, direction, upper_band, lower_band
 
 # Fetch Real-Time Price
 def fetch_realtime_price():
@@ -140,33 +134,6 @@ def execute_trade(symbol, quantity, side):
     logging.info(f"Executing {side} order for {quantity} of {symbol}...")
 
 # Main Trading Bot
-def initialize_volatility_from_history():
-    """Fetch historical data and calculate ATR values to initialize volatility."""
-    try:
-        # Fetch enough historical data for ATR calculation
-        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
-        data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
-                                             "close_time", "quote_asset_volume", "number_of_trades",
-                                             "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
-        high = data["high"].astype(float)
-        low = data["low"].astype(float)
-        close = data["close"].astype(float)
-
-        # Calculate ATR for historical data
-        tr1 = high - low
-        tr2 = abs(high - close.shift(1))
-        tr3 = abs(low - close.shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = tr.rolling(window=ATR_LEN).mean()
-
-        # Return the last 100 ATR values as volatility
-        volatility = atr[-100:].dropna().tolist()
-        logging.info(f"Initialized volatility with {len(volatility)} historical ATR values.")
-        return volatility
-    except Exception as e:
-        logging.error(f"Error initializing volatility: {e}")
-        return []
-
 def trading_bot():
     global last_direction
     volatility = initialize_volatility_from_history()
@@ -207,15 +174,21 @@ def trading_bot():
                 high, low, close, assigned_centroid
             )
 
+            # Log all values, including skipped cycles
             if supertrend is None:
-                logging.warning("SuperTrend calculation failed. Skipping cycle.")
-                time.sleep(60)
-                continue
+                logging.info(f"SuperTrend: None (neutral state).")
+            else:
+                logging.info(f"SuperTrend: {supertrend}")
 
-            # Log detailed information
             logging.info(f"ATR: {atr}, Volatility Level: {volatility_level}")
             logging.info(f"Cluster Centroid: {assigned_centroid}, Cluster Sizes: {cluster_sizes}")
-            logging.info(f"BTC Price: {close.iloc[-1]}, SuperTrend: {supertrend}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
+            logging.info(f"BTC Price: {close.iloc[-1]}, Upper Band: {upper_band.iloc[-1]}, Lower Band: {lower_band.iloc[-1]}, Direction: {direction}")
+
+            # Handle SuperTrend being None
+            if supertrend is None and direction == 0:
+                logging.info("Neutral direction. Waiting for signal change.")
+                time.sleep(60)
+                continue
 
             # Execute trade if signal changes
             if last_direction == 0 and direction in [1, -1]:
@@ -234,11 +207,8 @@ def trading_bot():
             logging.error(f"Error in trading bot: {e}", exc_info=True)
             time.sleep(60)
 
-
-# Run Flask and Trading Bot
 if __name__ == "__main__":
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     trading_bot()
-
 
 
