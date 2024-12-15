@@ -118,6 +118,7 @@ def initialize_historical_data():
         high, low, close, volatility = [], [], [], []
 
 # Calculate SuperTrend with Dynamic ATR Factor
+# Calculate SuperTrend with Constrained Dynamic ATR Factor
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     if len(high) == 0 or len(low) == 0 or len(close) == 0:
         logging.error("Insufficient market data for SuperTrend calculation. Skipping.")
@@ -127,8 +128,9 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         logging.error("Invalid centroid from clustering. Skipping SuperTrend calculation.")
         return None, None, None, None
 
-    # Dynamic ATR Factor
-    atr_factor = max(ATR_FACTOR_MIN, min(ATR_FACTOR_MAX, assigned_centroid / np.mean(volatility)))
+    # Constrain ATR Factor Dynamically (narrow range)
+    atr_factor = max(2.7, min(3.0, assigned_centroid / np.mean(volatility)))
+    logging.info(f"Dynamic ATR Factor: {atr_factor:.2f}")
 
     hl2 = (high + low) / 2
     upper_band = hl2 + atr_factor * assigned_centroid
@@ -151,6 +153,7 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         supertrend = None
 
     return supertrend, direction, upper_band, lower_band
+
 
 # WebSocket Handler
 def on_message(msg):
