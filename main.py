@@ -23,7 +23,7 @@ binance_client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 
 # Parameters
 ATR_LEN = 10
-ATR_FACTOR_MIN = 2.0
+ATR_FACTOR_MIN = 2.7
 ATR_FACTOR_MAX = 3.0
 FIXED_BUY_VALUE = 100  # $100 per buy
 SIGNAL_INTERVAL = 30  # Process signals every 30 seconds
@@ -118,7 +118,6 @@ def initialize_historical_data():
         high, low, close, volatility = [], [], [], []
 
 # Calculate SuperTrend with Dynamic ATR Factor
-# Calculate SuperTrend with Constrained Dynamic ATR Factor
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     if len(high) == 0 or len(low) == 0 or len(close) == 0:
         logging.error("Insufficient market data for SuperTrend calculation. Skipping.")
@@ -128,8 +127,8 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         logging.error("Invalid centroid from clustering. Skipping SuperTrend calculation.")
         return None, None, None, None
 
-    # Constrain ATR Factor Dynamically (narrow range)
-    atr_factor = max(2.7, min(3.0, assigned_centroid / np.mean(volatility)))
+    # Constrain ATR Factor Dynamically
+    atr_factor = max(ATR_FACTOR_MIN, min(ATR_FACTOR_MAX, assigned_centroid / np.mean(volatility)))
     logging.info(f"Dynamic ATR Factor: {atr_factor:.2f}")
 
     hl2 = (high + low) / 2
@@ -154,13 +153,15 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
 
     return supertrend, direction, upper_band, lower_band
 
-
 # WebSocket Handler
 def on_message(msg):
     global last_price, high, low, close
 
     try:
         # Extract price data from WebSocket message
+        if 'k' not in msg:
+            logging.warning(f"Unexpected message format: {msg}")
+            return
         candle = msg['k']
         last_price = float(candle['c'])  # Closing price
         high.append(float(candle['h']))
@@ -177,6 +178,21 @@ def on_message(msg):
 
     except Exception as e:
         logging.error(f"Error processing WebSocket message: {e}")
+
+# WebSocket Manager
+def start_websocket():
+    """Starts the Binance WebSocket for real-time price data."""
+    while True:  # Keep the WebSocket running
+        try:
+            logging.info("Starting WebSocket connection...")
+            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+            twm.start()
+            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
+            twm.join()  # Keep the WebSocket open
+        except Exception as e:
+            logging.error(f"WebSocket connection failed: {e}")
+            logging.info("Reconnecting in 5 seconds...")
+            time.sleep(5)  # Wait before reconnecting
 
 # Signal Processing Loop
 def process_signals():
