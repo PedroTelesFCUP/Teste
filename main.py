@@ -23,24 +23,26 @@ binance_client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 
 # Parameters
 ATR_LEN = 10
-ATR_FACTOR = 2.7
+ATR_FACTOR_MIN = 2.0
+ATR_FACTOR_MAX = 3.0
+FIXED_BUY_VALUE = 100  # $100 per buy
+SIGNAL_INTERVAL = 30  # Process signals every 30 seconds
 SYMBOL = "BTC/USD"
 ALPACA_SYMBOL = SYMBOL.replace("/", "")  # Alpaca doesn't use "/"
 BINANCE_SYMBOL = "BTCUSDT"
-QUANTITY = round(0.001, 8)
 
 # Logging Configuration
 logging.basicConfig(
-    level=logging.INFO,  # Change from DEBUG to INFO
+    level=logging.INFO,  # Change to INFO for cleaner logs
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
-
 logging.info("Trading bot initialized.")
 
 # Global Variables
 volatility = []  # Initialize volatility list
 last_price = None
 last_direction = 0
+last_signal_time = 0  # Track the last processed signal time
 high, low, close = [], [], []  # Historical data buffers for real-time updates
 
 # Flask Server
@@ -115,7 +117,7 @@ def initialize_historical_data():
         logging.error(f"Error initializing historical data: {e}")
         high, low, close, volatility = [], [], [], []
 
-# Calculate SuperTrend
+# Calculate SuperTrend with Dynamic ATR Factor
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     if len(high) == 0 or len(low) == 0 or len(close) == 0:
         logging.error("Insufficient market data for SuperTrend calculation. Skipping.")
@@ -125,20 +127,20 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         logging.error("Invalid centroid from clustering. Skipping SuperTrend calculation.")
         return None, None, None, None
 
+    # Dynamic ATR Factor
+    atr_factor = max(ATR_FACTOR_MIN, min(ATR_FACTOR_MAX, assigned_centroid / np.mean(volatility)))
+
     hl2 = (high + low) / 2
-    upper_band = hl2 + ATR_FACTOR * assigned_centroid
-    lower_band = hl2 - ATR_FACTOR * assigned_centroid
+    upper_band = hl2 + atr_factor * assigned_centroid
+    lower_band = hl2 - atr_factor * assigned_centroid
 
     # Determine direction
     if close.iloc[-1] > upper_band.iloc[-1]:
         direction = -1  # Bearish
-        logging.info(f"Direction: Bearish (-1). Price ({close.iloc[-1]}) > Upper Band ({upper_band.iloc[-1]}).")
     elif close.iloc[-1] < lower_band.iloc[-1]:
         direction = 1  # Bullish
-        logging.info(f"Direction: Bullish (1). Price ({close.iloc[-1]}) < Lower Band ({lower_band.iloc[-1]}).")
     else:
         direction = 0  # Neutral
-        logging.info(f"Direction: Neutral (0). Price ({close.iloc[-1]}) within bands: Lower Band ({lower_band.iloc[-1]}), Upper Band ({upper_band.iloc[-1]}).")
 
     # Assign SuperTrend based on direction
     if direction == 1:
@@ -147,7 +149,6 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         supertrend = upper_band.iloc[-1]
     else:
         supertrend = None
-        logging.info("Neutral direction. SuperTrend is None. No action required.")
 
     return supertrend, direction, upper_band, lower_band
 
@@ -156,11 +157,6 @@ def on_message(msg):
     global last_price, high, low, close
 
     try:
-        # Ensure the message contains the 'k' key (candlestick data)
-        if 'k' not in msg:
-            logging.warning(f"Received unexpected message format: {msg}")
-            return
-
         # Extract price data from WebSocket message
         candle = msg['k']
         last_price = float(candle['c'])  # Closing price
@@ -176,97 +172,25 @@ def on_message(msg):
         if len(close) > ATR_LEN + 1:
             close.pop(0)
 
-        # Perform real-time SuperTrend calculation
-        calculate_and_execute(last_price)
-
-        # Wait for 10 seconds to avoid exceeding API limits
-        time.sleep(10)
     except Exception as e:
-        logging.error(f"Error processing WebSocket message: {e}", exc_info=True)
+        logging.error(f"Error processing WebSocket message: {e}")
 
-
-# Robust WebSocket Start
-def start_websocket():
-    """Starts the Binance WebSocket for real-time price data."""
-    while True:  # Keep the WebSocket running
-        try:
-            logging.info("Starting WebSocket connection...")
-            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
-            twm.start()
-            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
-            twm.join()  # Keep the WebSocket open
-        except Exception as e:
-            logging.error(f"WebSocket connection failed: {e}")
-            logging.info("Reconnecting in 30 seconds...")
-            time.sleep(30)  # Wait before reconnecting
-
-# Execute a Trade
-def execute_trade(symbol, quantity, side):
-    try:
-        logging.info(f"Submitting {side} order for {quantity} {symbol}.")
-        alpaca_api.submit_order(
-            symbol=symbol,
-            qty=quantity,
-            side=side,
-            type="market",
-            time_in_force="gtc"
-        )
-        logging.info(f"{side.capitalize()} order submitted successfully.")
-    except Exception as e:
-        logging.error(f"Error executing {side} order: {e}")
-
-# Simplified `calculate_and_execute` with Enhanced Logging
-def calculate_and_execute(price):
-    global last_direction
-
-    if not volatility or len(volatility) < 3:  # Ensure there’s enough data for clustering
-        logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
-        return
-
-    # Perform clustering and SuperTrend calculation
-    centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
-    if assigned_centroid is None:
-        logging.warning("Clustering failed. Skipping cycle.")
-        return
-
-    # Calculate ATR
-    atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-
-    # Calculate SuperTrend
-    supertrend, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
-        pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
-    )
-
-    # Log Metrics (Handle None Values Gracefully)
-    supertrend_str = f"{supertrend:.2f}" if supertrend is not None else "None"
-    logging.info(
-        f"\nPrice: {price:.2f}\n"
-        f"ATR: {atr:.2f}\n"
-        f"Volatility Level: {volatility_level}\n"
-        f"Cluster Centroids: {centroids}\n"
-        f"Cluster Sizes: {cluster_sizes}\n"
-        f"SuperTrend: {supertrend_str}\n"
-        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
-        f"Upper Band: {upper_band.iloc[-1]:.2f}, Lower Band: {lower_band.iloc[-1]:.2f}\n"
-    )
-
-    # Execute trades based on signal changes
-    if last_direction == 0 and direction in [1, -1]:
-        trade_type = "buy" if direction == 1 else "sell"
-        execute_trade(ALPACA_SYMBOL, QUANTITY, trade_type)
-    elif last_direction == 1 and direction == -1:
-        execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-    elif last_direction == -1 and direction == 1:
-        execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
-
-    last_direction = direction
-
+# Signal Processing Loop
+def process_signals():
+    """Processes signals at fixed intervals."""
+    global last_signal_time
+    while True:
+        current_time = time.time()
+        if current_time - last_signal_time >= SIGNAL_INTERVAL:
+            if last_price is not None:
+                calculate_and_execute(last_price)
+            last_signal_time = current_time
+        time.sleep(1)  # Avoid CPU overuse
 
 # Start Flask and WebSocket
 if __name__ == "__main__":
-    initialize_historical_data()  # Initialize historical data before WebSocket starts
-    Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
+    initialize_historical_data()
+    Thread(target=process_signals, daemon=True).start()
     start_websocket()
-
 
 
