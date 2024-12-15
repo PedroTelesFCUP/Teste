@@ -33,7 +33,7 @@ BINANCE_SYMBOL = "BTCUSDT"
 
 # Logging Configuration
 logging.basicConfig(
-    level=logging.INFO,  # Change to INFO for cleaner logs
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logging.info("Trading bot initialized.")
@@ -62,19 +62,14 @@ def cluster_volatility(volatility, n_clusters=3):
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
-        # Centroids and cluster assignments
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
 
-        # Assign the latest volatility value to a cluster
         latest_volatility = volatility[-1][0]
         assigned_cluster = kmeans.predict([[latest_volatility]])[0]
         assigned_centroid = centroids[assigned_cluster]
 
-        # Calculate cluster sizes
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
-
-        # Calculate volatility level
         volatility_level = assigned_cluster + 1  # Pine uses 1-based indexing
 
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level
@@ -92,7 +87,6 @@ def calculate_atr(high, low, close):
 
 # Initialize Volatility and Historical Data
 def initialize_historical_data():
-    """Fetch historical data and calculate ATR values to initialize volatility and price buffers."""
     global high, low, close, volatility
     try:
         klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
@@ -103,14 +97,12 @@ def initialize_historical_data():
         low = data["low"].astype(float).tolist()
         close = data["close"].astype(float).tolist()
 
-        # Calculate ATR for historical data
         tr1 = data["high"].astype(float) - data["low"].astype(float)
         tr2 = abs(data["high"].astype(float) - data["close"].shift(1).astype(float))
         tr3 = abs(data["low"].astype(float) - data["close"].shift(1).astype(float))
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = tr.rolling(window=ATR_LEN).mean()
 
-        # Populate the global volatility list
         volatility = atr[-100:].dropna().tolist()
         logging.info(f"Initialized historical data with {len(close)} entries and {len(volatility)} ATR values.")
     except Exception as e:
@@ -127,7 +119,6 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         logging.error("Invalid centroid from clustering. Skipping SuperTrend calculation.")
         return None, None, None, None
 
-    # Constrain ATR Factor Dynamically
     atr_factor = max(ATR_FACTOR_MIN, min(ATR_FACTOR_MAX, assigned_centroid / np.mean(volatility)))
     logging.info(f"Dynamic ATR Factor: {atr_factor:.2f}")
 
@@ -135,7 +126,6 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     upper_band = hl2 + atr_factor * assigned_centroid
     lower_band = hl2 - atr_factor * assigned_centroid
 
-    # Determine direction
     if close.iloc[-1] > upper_band.iloc[-1]:
         direction = -1  # Bearish
     elif close.iloc[-1] < lower_band.iloc[-1]:
@@ -143,7 +133,6 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     else:
         direction = 0  # Neutral
 
-    # Assign SuperTrend based on direction
     if direction == 1:
         supertrend = lower_band.iloc[-1]
     elif direction == -1:
@@ -170,7 +159,6 @@ def execute_trade(symbol, fixed_value, side, price=None):
                 return
             logging.info(f"Current holdings for sell: {quantity}")
 
-        # Submit the trade
         logging.info(f"Submitting {side} order for {quantity} {symbol}.")
         alpaca_api.submit_order(
             symbol=symbol,
@@ -273,10 +261,9 @@ def process_signals():
         time.sleep(1)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))  # Default to 8080 if PORT not set
     initialize_historical_data()
     Thread(target=process_signals, daemon=True).start()
-    app.run(host="0.0.0.0", port=port)  # Bind to all network interfaces
+    start_websocket()
 
 
 
