@@ -153,22 +153,90 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
 
     return supertrend, direction, upper_band, lower_band
 
+# Execute Trades
+def execute_trade(symbol, fixed_value, side, price=None):
+    try:
+        if side == "buy":
+            if not price:
+                logging.error("Price is required for buy trades.")
+                return
+            quantity = round(fixed_value / price, 8)
+            logging.info(f"Calculated buy quantity: {quantity} for ${fixed_value} at price ${price:.2f}")
+        elif side == "sell":
+            position = alpaca_api.get_position(symbol)
+            quantity = float(position.qty) if position else 0.0
+            if quantity <= 0:
+                logging.warning("No holdings available to sell. Skipping trade.")
+                return
+            logging.info(f"Current holdings for sell: {quantity}")
+
+        # Submit the trade
+        logging.info(f"Submitting {side} order for {quantity} {symbol}.")
+        alpaca_api.submit_order(
+            symbol=symbol,
+            qty=quantity,
+            side=side,
+            type="market",
+            time_in_force="gtc"
+        )
+        logging.info(f"{side.capitalize()} order submitted successfully.")
+    except Exception as e:
+        logging.error(f"Error executing {side} order: {e}")
+
+# Process Signals
+def calculate_and_execute(price):
+    global last_direction
+
+    if not volatility or len(volatility) < 3:
+        logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
+        return
+
+    centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
+    if assigned_centroid is None:
+        logging.warning("Clustering failed. Skipping cycle.")
+        return
+
+    atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
+    supertrend, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
+        pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
+    )
+
+    supertrend_str = f"{supertrend:.2f}" if supertrend else "None"
+    logging.info(
+        f"\nPrice: {price:.2f}\n"
+        f"ATR: {atr:.2f}\n"
+        f"Volatility Level: {volatility_level}\n"
+        f"Cluster Centroids: {centroids}\n"
+        f"Cluster Sizes: {cluster_sizes}\n"
+        f"SuperTrend: {supertrend_str}\n"
+        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+        f"Upper Band: {upper_band.iloc[-1]:.2f}, Lower Band: {lower_band.iloc[-1]:.2f}\n"
+    )
+
+    if last_direction == 0 and direction in [1, -1]:
+        trade_type = "buy" if direction == 1 else "sell"
+        execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, trade_type, price=price if trade_type == "buy" else None)
+    elif last_direction == 1 and direction == -1:
+        execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "sell")
+    elif last_direction == -1 and direction == 1:
+        execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "buy")
+
+    last_direction = direction
+
 # WebSocket Handler
 def on_message(msg):
     global last_price, high, low, close
 
     try:
-        # Extract price data from WebSocket message
         if 'k' not in msg:
             logging.warning(f"Unexpected message format: {msg}")
             return
         candle = msg['k']
-        last_price = float(candle['c'])  # Closing price
+        last_price = float(candle['c'])
         high.append(float(candle['h']))
         low.append(float(candle['l']))
         close.append(float(candle['c']))
 
-        # Ensure lists don't grow indefinitely (keep only the last ATR_LEN + 1 entries)
         if len(high) > ATR_LEN + 1:
             high.pop(0)
         if len(low) > ATR_LEN + 1:
@@ -181,22 +249,20 @@ def on_message(msg):
 
 # WebSocket Manager
 def start_websocket():
-    """Starts the Binance WebSocket for real-time price data."""
-    while True:  # Keep the WebSocket running
+    while True:
         try:
             logging.info("Starting WebSocket connection...")
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
-            twm.join()  # Keep the WebSocket open
+            twm.join()
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
             logging.info("Reconnecting in 5 seconds...")
-            time.sleep(5)  # Wait before reconnecting
+            time.sleep(5)
 
 # Signal Processing Loop
 def process_signals():
-    """Processes signals at fixed intervals."""
     global last_signal_time
     while True:
         current_time = time.time()
@@ -204,12 +270,12 @@ def process_signals():
             if last_price is not None:
                 calculate_and_execute(last_price)
             last_signal_time = current_time
-        time.sleep(1)  # Avoid CPU overuse
+        time.sleep(1)
 
-# Start Flask and WebSocket
 if __name__ == "__main__":
     initialize_historical_data()
     Thread(target=process_signals, daemon=True).start()
     start_websocket()
+
 
 
