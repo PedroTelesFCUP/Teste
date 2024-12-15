@@ -263,8 +263,8 @@ def process_signals():
 if __name__ == "__main__":
     initialize_historical_data()
     Thread(target=process_signals, daemon=True).start()
+    Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
     start_websocket()
-
 
 
 
