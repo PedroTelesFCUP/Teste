@@ -23,7 +23,7 @@ binance_client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 
 # Parameters
 ATR_LEN = 10
-ATR_FACTOR = 3.0
+ATR_FACTOR = 2.7
 SYMBOL = "BTC/USD"
 ALPACA_SYMBOL = SYMBOL.replace("/", "")  # Alpaca doesn't use "/"
 BINANCE_SYMBOL = "BTCUSDT"
@@ -197,8 +197,8 @@ def start_websocket():
             twm.join()  # Keep the WebSocket open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info("Reconnecting in 5 seconds...")
-            time.sleep(5)  # Wait before reconnecting
+            logging.info("Reconnecting in 30 seconds...")
+            time.sleep(30)  # Wait before reconnecting
 
 # Execute a Trade
 def execute_trade(symbol, quantity, side):
