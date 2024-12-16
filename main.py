@@ -199,8 +199,8 @@ def calculate_and_execute(price):
     )
 
     # Update historical bands
-    upper_band_history.append(upper_band.iloc[-1])
-    lower_band_history.append(lower_band.iloc[-1])
+    upper_band_history.append(float(upper_band.iloc[-1]))
+    lower_band_history.append(float(lower_band.iloc[-1]))
 
     # Trim history to the max length
     if len(upper_band_history) > max_history_length:
@@ -208,11 +208,15 @@ def calculate_and_execute(price):
     if len(lower_band_history) > max_history_length:
         lower_band_history.pop(0)
 
-    # Log current state
+    # Log current state with formatted output
     logging.info(
         f"\nCurrent Price: {price:.2f}\n"
-        f"Upper Band History: {upper_band_history}\n"
-        f"Lower Band History: {lower_band_history}\n"
+        f"ATR: {atr:.2f}\n"
+        f"Volatility Level: {volatility_level}\n"
+        f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
+        f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
+        f"Upper Band History: {[f'{x:.2f}' for x in upper_band_history]}\n"
+        f"Lower Band History: {[f'{x:.2f}' for x in lower_band_history]}\n"
     )
 
     # Check current price against historical bands
@@ -228,6 +232,7 @@ def calculate_and_execute(price):
             execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "sell")
             last_direction = -1  # Update to "bearish"
             return  # Exit to prevent multiple trades in one cycle
+
 
 # WebSocket Handler
 def on_message(msg):
