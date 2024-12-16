@@ -3,7 +3,7 @@ import time
 import numpy as np
 import pandas as pd
 import logging
-from flask import Flask
+from flask import Flask, send_file
 from threading import Thread
 from binance import ThreadedWebsocketManager
 from binance.client import Client
@@ -31,14 +31,13 @@ SYMBOL = "BTC/USD"
 ALPACA_SYMBOL = SYMBOL.replace("/", "")  # Alpaca doesn't use "/"
 BINANCE_SYMBOL = "BTCUSDT"
 
-
-# Logging Configuration: Write to both file and console
+# Logging Configuration: File and Console
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("bot_logs.log"),  # Write to log file
-        logging.StreamHandler()              # Write to console/Render logs
+        logging.FileHandler("bot_logs.log"),  # Save logs to file
+        logging.StreamHandler()              # Output logs to console
     ]
 )
 logging.info("Trading bot initialized.")
@@ -55,9 +54,17 @@ max_history_length = 4  # Number of time periods to track
 
 # Flask Server
 app = Flask(__name__)
+
 @app.route("/")
 def home():
     return "Bot is running!", 200
+
+@app.route('/logs')
+def download_logs():
+    try:
+        return send_file("bot_logs.log", as_attachment=True)
+    except FileNotFoundError:
+        return "Log file not found.", 404
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
@@ -209,6 +216,7 @@ def calculate_and_execute(price):
         lower_band_history.pop(0)
 
     # Log current state with formatted output
+    direction_str = "Bullish (1)" if direction == 1 else "Bearish (-1)" if direction == -1 else "Neutral (0)"
     logging.info(
         f"\nCurrent Price: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
@@ -217,6 +225,7 @@ def calculate_and_execute(price):
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
         f"Upper Band History: {[f'{x:.2f}' for x in upper_band_history]}\n"
         f"Lower Band History: {[f'{x:.2f}' for x in lower_band_history]}\n"
+        f"Current Direction: {direction_str}\n"
     )
 
     # Check current price against historical bands
@@ -232,7 +241,6 @@ def calculate_and_execute(price):
             execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "sell")
             last_direction = -1  # Update to "bearish"
             return  # Exit to prevent multiple trades in one cycle
-
 
 # WebSocket Handler
 def on_message(msg):
@@ -288,6 +296,10 @@ if __name__ == "__main__":
     Thread(target=process_signals, daemon=True).start()
     Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
     start_websocket()
+
+
+
+
 
 
 
