@@ -56,7 +56,13 @@ app = Flask(__name__)
 @app.route("/")
 def home():
     return "Bot is running!", 200
-
+@app.route('/logs')
+def download_logs():
+    try:
+        # Ensure the log file exists
+        return send_file("bot_logs.log", as_attachment=True)
+    except FileNotFoundError:
+        return "Log file not found.", 404
 
 # Initialize Historical Data
 def initialize_historical_data():
