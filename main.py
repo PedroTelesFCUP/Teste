@@ -245,7 +245,7 @@ def start_websocket():
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info(f"Reconnecting in 30'seconds...")
+            logging.info(f"Reconnecting in 30 seconds...")
             time.sleep(30)  # Wait before reconnecting
 
 # Signal Processing Loop
