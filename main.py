@@ -10,6 +10,16 @@ from binance.client import Client
 from sklearn.cluster import KMeans
 from alpaca_trade_api.rest import REST  # Alpaca API
 
+def restart_program():
+    """Restart the current program."""
+    try:
+        print("Restarting program...")
+        time.sleep(2)  # Optional delay
+        os.execv(sys.executable, ['python'] + sys.argv)
+    except Exception as e:
+        print(f"Failed to restart program: {e}")
+
+
 # Alpaca API Credentials
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
@@ -221,19 +231,22 @@ def on_message(msg):
         close.pop(0)
 
 # WebSocket Manager
-# WebSocket Manager
 def start_websocket():
-    while True:
+    """Starts the Binance WebSocket for real-time price data."""
+    while True:  # Keep the WebSocket running
         try:
             logging.info("Starting WebSocket connection...")
+            # Initialize ThreadedWebsocketManager
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
+
+            # Start streaming 5-minute candles
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="5m")
-            twm.join()  # Keep the WebSocket connection running
+            twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info("Reconnecting in 30 seconds...")
-            time.sleep(30)
+            logging.info(f"Reconnecting in {RESTART_INTERVAL} seconds...")
+            time.sleep(RESTART_INTERVAL)  # Wait before reconnecting
 
 # Signal Processing Loop
 def process_signals():
@@ -256,8 +269,13 @@ if __name__ == "__main__":
     # Start Flask app in a separate thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     time.sleep(10)
+
     # Start Signal Processing Loop in a separate thread
     Thread(target=process_signals, daemon=True).start()
 
     # Start WebSocket for real-time data
-    start_websocket()
+    try:
+        start_websocket()
+    except Exception as e:
+        logging.error(f"Critical failure in WebSocket connection: {e}. Restarting...")
+        restart_program()
