@@ -255,7 +255,7 @@ if __name__ == "__main__":
 
     # Start Flask app in a separate thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
-
+    time.sleep(10)
     # Start Signal Processing Loop in a separate thread
     Thread(target=process_signals, daemon=True).start()
 
