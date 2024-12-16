@@ -44,6 +44,7 @@ high, low, close = [], [], []  # Historical data buffers for real-time updates
 upper_band_history = []  # Store last 4 upper bands
 lower_band_history = []  # Store last 4 lower bands
 max_history_length = 4  # Maximum history to store
+last_signal_time = 0
 
 # Flask Server
 app = Flask(__name__)
@@ -267,7 +268,8 @@ def process_signals():
                 except Exception as e:
                     logging.error(f"Error during signal processing: {e}", exc_info=True)
             last_signal_time = current_time
-        time.sleep(1)  # Check every second, ensuring SIGNAL_INTERVAL is respected
+        time.sleep(1)  # Check every second to ensure SIGNAL_INTERVAL is respected
+
 
 # Main Script Entry Point
 if __name__ == "__main__":
