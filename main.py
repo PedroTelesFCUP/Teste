@@ -233,7 +233,7 @@ def start_websocket():
             twm.start_kline_socket(
                 callback=on_message,
                 symbol=BINANCE_SYMBOL.lower(),
-                interval="1m"
+                interval="5m"
             )
             twm.join()
         except Exception as e:
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     def initialize_historical_data():
         global high, low, close, volatility
         try:
-            klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
+            klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="5m", limit=100 + ATR_LEN)
             data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
                                                  "close_time", "quote_asset_volume", "number_of_trades",
                                                  "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
