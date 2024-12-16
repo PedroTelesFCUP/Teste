@@ -214,15 +214,20 @@ def start_websocket():
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BIN
 
 
-# WebSocket Manager (continued)
+# WebSocket Manager (corrected)
+def start_websocket():
+    while True:
+        try:
+            logging.info("Starting WebSocket connection...")
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
             twm.join()
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info("Reconnecting in 5 seconds...")
-            time.sleep(5)
+            logging.info("Reconnecting in 30 seconds...")
+            time.sleep(30)
+
 
 # Signal Processing Loop
 def process_signals():
