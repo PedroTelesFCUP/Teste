@@ -211,16 +211,6 @@ def start_websocket():
     while True:
         try:
             logging.info("Starting WebSocket connection...")
-            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BIN
-
-
-# WebSocket Manager
-# WebSocket Manager
-# WebSocket Manager
-def start_websocket():
-    while True:
-        try:
-            logging.info("Starting WebSocket connection...")
             # Properly formatted ThreadedWebsocketManager
             twm = ThreadedWebsocketManager(
                 api_key=BINANCE_API_KEY,
