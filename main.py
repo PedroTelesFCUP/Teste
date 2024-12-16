@@ -171,31 +171,38 @@ def execute_trade(symbol, quantity, side):
 
 # Simplified `calculate_and_execute` with Enhanced Logging
 def calculate_and_execute(price):
-    global last_direction, upper_band_history, lower_band_history
+    global last_direction, upper_band_history, lower_band_history, volatility
 
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
 
-    # Perform clustering and SuperTrend calculation
+    # Perform clustering
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
         return
 
+    # Calculate ATR and SuperTrend
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
     _, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
+    # Append the latest ATR to volatility and maintain fixed size
+    volatility.append(atr)
+    if len(volatility) > 100:  # Keep only the last 100 ATR values
+        volatility.pop(0)
+
+    # Update historical bands
     upper_band_history.append(float(upper_band.iloc[-1]))
     lower_band_history.append(float(lower_band.iloc[-1]))
-
     if len(upper_band_history) > 4:
         upper_band_history.pop(0)
     if len(lower_band_history) > 4:
         lower_band_history.pop(0)
 
+    # Log information with improved readability
     logging.info(
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
@@ -209,6 +216,7 @@ def calculate_and_execute(price):
         f"========================="
     )
 
+    # Execute trades based on signals
     if last_direction == 0 and direction in [1, -1]:
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy" if direction == 1 else "sell")
     elif last_direction == 1 and direction == -1:
@@ -217,8 +225,7 @@ def calculate_and_execute(price):
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
 
     last_direction = direction
-
-
+    
 # WebSocket Handler
 def on_message(msg):
     global last_price, high, low, close
