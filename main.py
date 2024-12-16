@@ -144,7 +144,7 @@ def execute_trade(symbol, fixed_value, side, price=None):
     except Exception as e:
         logging.error(f"Error executing {side} order: {e}")
 
-# Process Signals
+# Process Signals with logging of the last 4 upper and lower band values
 def calculate_and_execute(price):
     global last_direction, upper_band_history, lower_band_history
     if not volatility or len(volatility) < 3:
@@ -166,13 +166,13 @@ def calculate_and_execute(price):
     upper_band_history.append(float(upper_band.iloc[-1]))
     lower_band_history.append(float(lower_band.iloc[-1]))
 
-    # Trim history to the max length
+    # Trim history to the max length (last 4 values)
     if len(upper_band_history) > max_history_length:
         upper_band_history.pop(0)
     if len(lower_band_history) > max_history_length:
         lower_band_history.pop(0)
 
-    # Log current state with formatted output
+    # Log current state with extended information
     direction_str = "Bullish (1)" if direction == 1 else "Bearish (-1)" if direction == -1 else "Neutral (0)"
     logging.info(
         f"\nCurrent Price: {price:.2f}\n"
@@ -180,8 +180,8 @@ def calculate_and_execute(price):
         f"Volatility Level: {volatility_level}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-        f"Upper Band: {upper_band.iloc[-1]:.2f}\n"
-        f"Lower Band: {lower_band.iloc[-1]:.2f}\n"
+        f"Upper Band History (Last 4): {[f'{x:.2f}' for x in upper_band_history]}\n"
+        f"Lower Band History (Last 4): {[f'{x:.2f}' for x in lower_band_history]}\n"
         f"Current Direction: {direction_str}\n"
     )
 
