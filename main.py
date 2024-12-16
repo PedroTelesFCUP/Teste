@@ -2,6 +2,7 @@ import time
 import numpy as np
 import pandas as pd
 import logging
+import os
 from flask import Flask
 from threading import Thread
 from binance import ThreadedWebsocketManager
