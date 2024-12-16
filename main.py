@@ -243,7 +243,49 @@ def process_signals():
         current_time = time.time()
         if current_time - last_signal_time >= SIGNAL_INTERVAL:
             if last_price is not None:
-                calculate_and_execute(last_price
+                try:
+                    calculate_and_execute(last_price)
+                except Exception as e:
+                    logging.error(f"Error during signal processing: {e}")
+            last_signal_time = current_time
+        time.sleep(1)
+
+if __name__ == "__main__":
+    # Initialize historical data
+    def initialize_historical_data():
+        global high, low, close, volatility
+        try:
+            klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="5m", limit=100 + ATR_LEN)
+            data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
+                                                 "close_time", "quote_asset_volume", "number_of_trades",
+                                                 "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
+            high = data["high"].astype(float).tolist()
+            low = data["low"].astype(float).tolist()
+            close = data["close"].astype(float).tolist()
+
+            tr1 = data["high"].astype(float) - data["low"].astype(float)
+            tr2 = abs(data["high"].astype(float) - data["close"].shift(1).astype(float))
+            tr3 = abs(data["low"].astype(float) - data["close"].shift(1).astype(float))
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = tr.rolling(window=ATR_LEN).mean()
+
+            volatility = atr[-100:].dropna().tolist()
+            logging.info(f"Initialized historical data with {len(close)} entries and {len(volatility)} ATR values.")
+        except Exception as e:
+            logging.error(f"Error initializing historical data: {e}")
+            high, low, close, volatility = [], [], [], []
+
+    initialize_historical_data()
+
+    # Start Flask server and trading bot threads
+    try:
+        Thread(target=process_signals, daemon=True).start()
+        Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
+        start_websocket()
+    except Exception as e:
+        logging.error(f"Error starting the trading bot: {e}")
+
+
 
 
 
