@@ -160,6 +160,7 @@ def calculate_and_execute(price):
         f"\nCurrent Price: {price:.2f}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
+        f"Volatility: {volatility[-1]:.2f}\n"
         f"ATR: {atr:.2f}\n"
         f"Upper Band: {upper_band.iloc[-1]:.2f}\n"
         f"Lower Band: {lower_band.iloc[-1]:.2f}\n"
