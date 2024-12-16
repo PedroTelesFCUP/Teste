@@ -141,10 +141,13 @@ def calculate_and_execute(price):
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
 
-    # Calculate volatility levels and sizes
-    high_volatility, medium_volatility, low_volatility, high_size, medium_size, low_size = calculate_volatility_levels(volatility)
+    # Dynamically recalculate volatility levels and sizes
+    high_volatility, medium_volatility, low_volatility = np.percentile(volatility, [75, 50, 25])
+    high_size = sum(1 for v in volatility if v >= high_volatility)
+    medium_size = sum(1 for v in volatility if medium_volatility <= v < high_volatility)
+    low_size = sum(1 for v in volatility if v < medium_volatility)
 
-    # Assign clusters based on centroids
+    # Assign clusters based on dynamically recalculated centroids
     centroids = [high_volatility, medium_volatility, low_volatility]
     cluster_sizes = [high_size, medium_size, low_size]
 
