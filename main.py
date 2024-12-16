@@ -45,6 +45,7 @@ upper_band_history = []  # Store last 4 upper bands
 lower_band_history = []  # Store last 4 lower bands
 max_history_length = 4  # Maximum history to store
 last_signal_time = 0
+SIGNAL_INTERVAL = 30  # Adjust the interval as needed, e.g., 30 seconds
 
 # Flask Server
 app = Flask(__name__)
@@ -258,7 +259,7 @@ def execute_trade(symbol, quantity, side):
 
 # Signal Processing Loop
 def process_signals():
-    global last_signal_time
+    global last_signal_time, SIGNAL_INTERVAL  # Ensure SIGNAL_INTERVAL is included here
     while True:
         current_time = time.time()
         if current_time - last_signal_time >= SIGNAL_INTERVAL:
@@ -268,7 +269,7 @@ def process_signals():
                 except Exception as e:
                     logging.error(f"Error during signal processing: {e}", exc_info=True)
             last_signal_time = current_time
-        time.sleep(1)  # Check every second to ensure SIGNAL_INTERVAL is respected
+        time.sleep(1)  # Check every second
 
 
 # Main Script Entry Point
