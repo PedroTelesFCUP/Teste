@@ -28,15 +28,15 @@ FIXED_BUY_VALUE = 100  # $100 per buy
 SIGNAL_INTERVAL = 30  # Process signals every 30 seconds
 ALPACA_SYMBOL = "BTC/USD"
 BINANCE_SYMBOL = "BTCUSDT"
-HOLD_PERIOD = 3  # Minimum hold period for transitions
+TRAINING_DATA_PERIOD = 100
 
 # Logging Configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("bot_logs.log"),
-        logging.StreamHandler()
+        logging.FileHandler("bot_logs.log"),  # Save logs to file
+        logging.StreamHandler()              # Output logs to console
     ]
 )
 logging.info("Trading bot initialized.")
@@ -45,12 +45,10 @@ logging.info("Trading bot initialized.")
 volatility = []
 last_price = None
 last_direction = 0
-direction_hold_counter = 0
+last_signal_time = 0
 high, low, close = [], [], []
 upper_band_history = []
 lower_band_history = []
-prev_upper_band = None
-prev_lower_band = None
 max_history_length = 4
 
 # Flask Server
@@ -67,26 +65,12 @@ def download_logs():
     except FileNotFoundError:
         return "Log file not found.", 404
 
-# Perform K-Means Clustering on volatility
-def cluster_volatility(volatility, n_clusters=3):
-    if len(volatility) < n_clusters:
-        logging.error("Not enough data points for clustering. Skipping.")
-        return None, None, None, None
-    try:
-        volatility = np.array(volatility).reshape(-1, 1)
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        kmeans.fit(volatility)
-        centroids = kmeans.cluster_centers_.flatten()
-        labels = kmeans.labels_
-        latest_volatility = volatility[-1][0]
-        assigned_cluster = kmeans.predict([[latest_volatility]])[0]
-        assigned_centroid = centroids[assigned_cluster]
-        cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
-        volatility_level = assigned_cluster + 1
-        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level
-    except Exception as e:
-        logging.error(f"Clustering failed: {e}")
-        return None, None, None, None, None
+# Perform Percentile-Based Volatility Classification
+def calculate_volatility_levels(volatility):
+    high_volatility = np.percentile(volatility, 75)
+    medium_volatility = np.percentile(volatility, 50)
+    low_volatility = np.percentile(volatility, 25)
+    return high_volatility, medium_volatility, low_volatility
 
 # Calculate ATR
 def calculate_atr(high, low, close):
@@ -96,26 +80,36 @@ def calculate_atr(high, low, close):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(window=ATR_LEN).mean().iloc[-1]
 
-# SuperTrend with Sticky Band Logic and Minimum Hold Period
-def calculate_supertrend_with_sticky_bands_and_hold(high, low, close, prev_upper_band, prev_lower_band, atr_factor, atr_value, last_direction):
-    hl2 = (high + low) / 2  # Midpoint
-    upper_band = hl2 + atr_factor * atr_value
-    lower_band = hl2 - atr_factor * atr_value
+# Calculate SuperTrend with Stickiness
+def calculate_supertrend_with_stickiness(high, low, close, atr):
+    hl2 = (high + low) / 2
+    upper_band = hl2 + ATR_FACTOR * atr
+    lower_band = hl2 - ATR_FACTOR * atr
 
-    # Sticky band logic
-    upper_band = upper_band if upper_band < prev_upper_band or close[-2] > prev_upper_band else prev_upper_band
-    lower_band = lower_band if lower_band > prev_lower_band or close[-2] < prev_lower_band else prev_lower_band
+    prev_upper_band = np.nan if len(upper_band) < 2 else upper_band.iloc[-2]
+    prev_lower_band = np.nan if len(lower_band) < 2 else lower_band.iloc[-2]
 
-    # Determine direction with hold period
-    direction = last_direction  # Default to current direction
-    if last_direction != 1 and close[-1] < lower_band:
-        direction = 1  # Bullish
-    elif last_direction != -1 and close[-1] > upper_band:
-        direction = -1  # Bearish
-    elif last_direction != 0 and abs(close[-1] - hl2) < HOLD_PERIOD * atr_value:
-        direction = 0  # Neutral
+    if not np.isnan(prev_upper_band):
+        upper_band.iloc[-1] = (
+            upper_band.iloc[-1]
+            if upper_band.iloc[-1] < prev_upper_band or close.iloc[-2] > prev_upper_band
+            else prev_upper_band
+        )
 
-    return upper_band, lower_band, direction
+    if not np.isnan(prev_lower_band):
+        lower_band.iloc[-1] = (
+            lower_band.iloc[-1]
+            if lower_band.iloc[-1] > prev_lower_band or close.iloc[-2] < prev_lower_band
+            else prev_lower_band
+        )
+
+    direction = 0
+    if close.iloc[-1] > upper_band.iloc[-1]:
+        direction = -1
+    elif close.iloc[-1] < lower_band.iloc[-1]:
+        direction = 1
+
+    return direction, upper_band, lower_band
 
 # Execute Trades
 def execute_trade(symbol, fixed_value, side, price=None):
@@ -145,59 +139,41 @@ def execute_trade(symbol, fixed_value, side, price=None):
     except Exception as e:
         logging.error(f"Error executing {side} order: {e}")
 
-# Signal Processing
+# Process Signals
 def calculate_and_execute(price):
-    global last_direction, upper_band_history, lower_band_history, direction_hold_counter, prev_upper_band, prev_lower_band
-
+    global last_direction, upper_band_history, lower_band_history
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
-
-    centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
-    if assigned_centroid is None:
-        logging.warning("Clustering failed. Skipping cycle.")
-        return
-
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-    upper_band, lower_band, direction = calculate_supertrend_with_sticky_bands_and_hold(
-        pd.Series(high), pd.Series(low), pd.Series(close),
-        prev_upper_band, prev_lower_band,
-        ATR_FACTOR, atr, last_direction
+    direction, upper_band, lower_band = calculate_supertrend_with_stickiness(
+        pd.Series(high), pd.Series(low), pd.Series(close), atr
     )
-
-    # Update sticky bands
-    prev_upper_band = upper_band
-    prev_lower_band = lower_band
-
-    # Log current state
+    upper_band_history.append(float(upper_band.iloc[-1]))
+    lower_band_history.append(float(lower_band.iloc[-1]))
+    if len(upper_band_history) > max_history_length:
+        upper_band_history.pop(0)
+    if len(lower_band_history) > max_history_length:
+        lower_band_history.pop(0)
+    direction_str = "Bullish (1)" if direction == 1 else "Bearish (-1)" if direction == -1 else "Neutral (0)"
     logging.info(
         f"\nCurrent Price: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
-        f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-        f"Upper Band: {upper_band:.2f}\n"
-        f"Lower Band: {lower_band:.2f}\n"
-        f"Current Direction: {direction}\n"
+        f"Upper Band: {upper_band.iloc[-1]:.2f}\n"
+        f"Lower Band: {lower_band.iloc[-1]:.2f}\n"
+        f"Current Direction: {direction_str}\n"
     )
-
-    # Manage hold period for transitions
-    if direction != last_direction:
-        if direction_hold_counter >= HOLD_PERIOD:
-            logging.info(f"State change: {last_direction} -> {direction}")
-            last_direction = direction
-            direction_hold_counter = 0  # Reset hold counter
-
-            # Execute trade
-            if direction == 1:
-                logging.info("Buy signal detected.")
-                execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "buy", price=price)
-            elif direction == -1:
-                logging.info("Sell signal detected.")
-                execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "sell")
-        else:
-            direction_hold_counter += 1
-            logging.info(f"Holding state for {direction_hold_counter} cycles.")
-    else:
-        direction_hold_counter = 0  # Reset if no change
+    for i in range(len(upper_band_history)):
+        if price < lower_band_history[i] and last_direction != 1:
+            logging.info(f"Buy signal detected: Price {price:.2f} below historical lower band {lower_band_history[i]:.2f}.")
+            execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "buy", price=price)
+            last_direction = 1
+            return
+        elif price > upper_band_history[i] and last_direction != -1:
+            logging.info(f"Sell signal detected: Price {price:.2f} above historical upper band {upper_band_history[i]:.2f}.")
+            execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "sell")
+            last_direction = -1
+            return
 
 # WebSocket Handler
 def on_message(msg):
@@ -227,7 +203,7 @@ def start_websocket():
             logging.info("Starting WebSocket connection...")
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
-            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
+            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="5m")
             twm.join()
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
@@ -245,36 +221,40 @@ def process_signals():
             last_signal_time = current_time
         time.sleep(1)
 
-# Initialize Historical Data
-def initialize_historical_data():
-    global high, low, close, volatility
-    try:
-        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
-        data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", 
-                                             "close_time", "quote_asset_volume", "number_of_trades",
-                                             "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
-        high = data["high"].astype(float).tolist()
-        low = data["low"].astype(float).tolist()
-        close = data["close"].astype(float).tolist()
-
-        tr1 = data["high"].astype(float) - data["low"].astype(float)
-        tr2 = abs(data["high"].astype(float) - data["close"].shift(1).astype(float))
-        tr3 = abs(data["low"].astype(float) - data["close"].shift(1).astype(float))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = tr.rolling(window=ATR_LEN).mean()
-
-        volatility = atr[-100:].dropna().tolist()
-        logging.info(f"Initialized historical data with {len(close)} entries and {len(volatility)} ATR values.")
-    except Exception as e:
-        logging.error(f"Error initializing historical data: {e}")
-        high, low, close, volatility = [], [], [], []
-
 if __name__ == "__main__":
+    def initialize_historical_data():
+        global high, low, close, volatility
+        try:
+            klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="5m", limit=100 + ATR_LEN)
+            data = pd.DataFrame(klines, columns=["open_time", "open", "high",
+                                                 "low", "close", "volume", 
+                                                 "close_time", "quote_asset_volume", 
+                                                 "number_of_trades", 
+                                                 "taker_buy_base_asset_volume", 
+                                                 "taker_buy_quote_asset_volume", "ignore"])
+            high = data["high"].astype(float).tolist()
+            low = data["low"].astype(float).tolist()
+            close = data["close"].astype(float).tolist()
+
+            tr1 = data["high"].astype(float) - data["low"].astype(float)
+            tr2 = abs(data["high"].astype(float) - data["close"].shift(1).astype(float))
+            tr3 = abs(data["low"].astype(float) - data["close"].shift(1).astype(float))
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = tr.rolling(window=ATR_LEN).mean()
+
+            volatility = atr[-TRAINING_DATA_PERIOD:].dropna().tolist()
+            logging.info(f"Initialized historical data with {len(close)} entries and {len(volatility)} ATR values.")
+        except Exception as e:
+            logging.error(f"Error initializing historical data: {e}")
+            high, low, close, volatility = [], [], [], []
+
+    # Initialize historical data
     initialize_historical_data()
 
     # Start the Flask server and trading bot threads
     Thread(target=process_signals, daemon=True).start()
     Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
     start_websocket()
+
 
 
