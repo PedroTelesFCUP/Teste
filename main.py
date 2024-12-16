@@ -107,7 +107,7 @@ def calculate_supertrend_with_multiplier(high, low, close, assigned_centroid):
     logging.info(f"Dynamic ATR Factor: {atr_factor:.2f}")
     hl2 = (high + low) / 2
     upper_band = hl2 + A_MULTIPLIER * (atr_factor * assigned_centroid)
-    lower_band = hl2 - A_MULTIPLIER * (atr_factor * assigned_centroid)
+    lower_band = hl2 - (atr_factor * assigned_centroid)
     if close.iloc[-1] > upper_band.iloc[-1]:
         direction = -1
     elif close.iloc[-1] < lower_band.iloc[-1]:
@@ -214,7 +214,7 @@ def start_websocket():
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BIN
 
 
-# WebSocket Manager (corrected)
+# WebSocket Manager
 def start_websocket():
     while True:
         try:
