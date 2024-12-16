@@ -141,7 +141,16 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     else:
         direction = 0  # Neutral
 
-    return direction, upper_band, lower_band
+    # Assign SuperTrend based on direction
+    if direction == 1:
+        supertrend = lower_band.iloc[-1]
+    elif direction == -1:
+        supertrend = upper_band.iloc[-1]
+    else:
+        supertrend = None
+
+    return supertrend, direction, upper_band, lower_band
+
 
 # Simplified `calculate_and_execute` with Enhanced Logging and History Comparison
 def calculate_and_execute(price):
