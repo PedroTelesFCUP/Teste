@@ -33,6 +33,8 @@ BINANCE_SYMBOL = "BTCUSDT"
 
 # Logging Configuration
 logging.basicConfig(
+    filename="bot_logs.log",
+    filemode="w",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -44,6 +46,9 @@ last_price = None
 last_direction = 0
 last_signal_time = 0  # Track the last processed signal time
 high, low, close = [], [], []  # Historical data buffers for real-time updates
+upper_band_history = []  # Store recent upper band values
+lower_band_history = []  # Store recent lower band values
+max_history_length = 4  # Number of time periods to track
 
 # Flask Server
 app = Flask(__name__)
@@ -85,7 +90,7 @@ def calculate_atr(high, low, close):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(window=ATR_LEN).mean().iloc[-1]
 
-# Initialize Volatility and Historical Data
+# Initialize Historical Data
 def initialize_historical_data():
     global high, low, close, volatility
     try:
@@ -173,12 +178,13 @@ def execute_trade(symbol, fixed_value, side, price=None):
 
 # Process Signals
 def calculate_and_execute(price):
-    global last_direction
+    global last_direction, upper_band_history, lower_band_history
 
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
 
+    # Perform clustering and calculate SuperTrend
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
@@ -189,27 +195,36 @@ def calculate_and_execute(price):
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
-    supertrend_str = f"{supertrend:.2f}" if supertrend else "None"
+    # Update historical bands
+    upper_band_history.append(upper_band.iloc[-1])
+    lower_band_history.append(lower_band.iloc[-1])
+
+    # Trim history to the max length
+    if len(upper_band_history) > max_history_length:
+        upper_band_history.pop(0)
+    if len(lower_band_history) > max_history_length:
+        lower_band_history.pop(0)
+
+    # Log current state
     logging.info(
-        f"\nPrice: {price:.2f}\n"
-        f"ATR: {atr:.2f}\n"
-        f"Volatility Level: {volatility_level}\n"
-        f"Cluster Centroids: {centroids}\n"
-        f"Cluster Sizes: {cluster_sizes}\n"
-        f"SuperTrend: {supertrend_str}\n"
-        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
-        f"Upper Band: {upper_band.iloc[-1]:.2f}, Lower Band: {lower_band.iloc[-1]:.2f}\n"
+        f"\nCurrent Price: {price:.2f}\n"
+        f"Upper Band History: {upper_band_history}\n"
+        f"Lower Band History: {lower_band_history}\n"
     )
 
-    if last_direction == 0 and direction in [1, -1]:
-        trade_type = "buy" if direction == 1 else "sell"
-        execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, trade_type, price=price if trade_type == "buy" else None)
-    elif last_direction == 1 and direction == -1:
-        execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "sell")
-    elif last_direction == -1 and direction == 1:
-        execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "buy")
+    # Check current price against historical bands
+    for i in range(len(upper_band_history)):
+        if price < lower_band_history[i] and last_direction != 1:
+            logging.info(f"Buy signal: Current price {price:.2f} is below historical lower band {lower_band_history[i]:.2f}.")
+            execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "buy", price=price)
+            last_direction = 1  # Update to "bullish"
+            return  # Exit to prevent multiple trades in one cycle
 
-    last_direction = direction
+        elif price > upper_band_history[i] and last_direction != -1:
+            logging.info(f"Sell signal: Current price {price:.2f} is above historical upper band {upper_band_history[i]:.2f}.")
+            execute_trade(ALPACA_SYMBOL, FIXED_BUY_VALUE, "sell")
+            last_direction = -1  # Update to "bearish"
+            return  # Exit to prevent multiple trades in one cycle
 
 # WebSocket Handler
 def on_message(msg):
