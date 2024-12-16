@@ -36,8 +36,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("bot_logs.log"),
-        logging.StreamHandler()
+        logging.FileHandler("bot_logs.log"),  # Save logs to file
+        logging.StreamHandler()              # Output logs to console
     ]
 )
 logging.info("Trading bot initialized.")
@@ -150,29 +150,42 @@ def calculate_and_execute(price):
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
+    
+    # Perform clustering and calculate SuperTrend
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
         return
+
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
     direction, upper_band, lower_band = calculate_supertrend_with_multiplier(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
+
+    # Update historical bands
     upper_band_history.append(float(upper_band.iloc[-1]))
     lower_band_history.append(float(lower_band.iloc[-1]))
+
+    # Trim history to the max length
     if len(upper_band_history) > max_history_length:
         upper_band_history.pop(0)
     if len(lower_band_history) > max_history_length:
         lower_band_history.pop(0)
+
+    # Log current state with formatted output
     direction_str = "Bullish (1)" if direction == 1 else "Bearish (-1)" if direction == -1 else "Neutral (0)"
     logging.info(
         f"\nCurrent Price: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
+        f"Volatility Level: {volatility_level}\n"
+        f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
         f"Upper Band: {upper_band.iloc[-1]:.2f}\n"
         f"Lower Band: {lower_band.iloc[-1]:.2f}\n"
         f"Current Direction: {direction_str}\n"
     )
+
+    # Check current price against historical bands
     for i in range(len(upper_band_history)):
         if price < lower_band_history[i] and last_direction != 1:
             logging.info(f"Buy signal detected: Price {price:.2f} below historical lower band {lower_band_history[i]:.2f}.")
