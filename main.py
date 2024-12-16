@@ -145,50 +145,55 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
 def calculate_and_execute(price):
     global last_direction, upper_band_history, lower_band_history
 
-    if not volatility or len(volatility) < 3:  # Ensure there’s enough data for clustering
+    if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
 
-    # Perform clustering and SuperTrend calculation
+    # Perform clustering
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
         return
 
-    # Calculate ATR
+    # Calculate ATR and SuperTrend
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-
-    # Calculate SuperTrend
-    direction, upper_band, lower_band = calculate_supertrend_with_clusters(
+    _, direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
-    # Update historical band lists
-    upper_band_history.append(upper_band.iloc[-1])
-    lower_band_history.append(lower_band.iloc[-1])
-
-    # Limit history length to 4
-    if len(upper_band_history) > max_history_length:
+    # Update historical bands
+    upper_band_history.append(float(upper_band.iloc[-1]))
+    lower_band_history.append(float(lower_band.iloc[-1]))
+    if len(upper_band_history) > 4:
         upper_band_history.pop(0)
-    if len(lower_band_history) > max_history_length:
+    if len(lower_band_history) > 4:
         lower_band_history.pop(0)
 
-    # Log Metrics
+    # Log information with improved readability
     logging.info(
-        f"Price: {price:.2f}, ATR: {atr:.2f}, Direction: {direction}, "
-        f"Upper Bands (Last 4): {upper_band_history}, Lower Bands (Last 4): {lower_band_history}"
+        f"\n=== Signal Processing ===\n"
+        f"Price: {price:.2f}\n"
+        f"ATR: {atr:.2f}\n"
+        f"Volatility Level: {volatility_level}\n"
+        f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
+        f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
+        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+        f"Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_history)}\n"
+        f"Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_history)}\n"
+        f"========================="
     )
 
-    # Compare price to historical bands
-    for i in range(len(upper_band_history)):
-        if price < lower_band_history[i] and last_direction != 1:
-            execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
-            last_direction = 1
-            break
-        elif price > upper_band_history[i] and last_direction != -1:
-            execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-            last_direction = -1
-            break
+
+    # Execute trades based on signals
+    if last_direction == 0 and direction in [1, -1]:
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "buy" if direction == 1 else "sell")
+    elif last_direction == 1 and direction == -1:
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
+    elif last_direction == -1 and direction == 1:
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
+
+    last_direction = direction
+
 
 # WebSocket Handler
 def on_message(msg):
@@ -211,10 +216,9 @@ def on_message(msg):
         if len(close) > ATR_LEN + 1:
             close.pop(0)
 
-        calculate_and_execute(last_price)
-        time.sleep(5)
     except Exception as e:
         logging.error(f"Error processing WebSocket message: {e}")
+
 
 
 # WebSocket Manager
@@ -223,7 +227,6 @@ def start_websocket():
     while True:  # Keep the WebSocket running
         try:
             logging.info("Starting WebSocket connection...")
-            # Initialize ThreadedWebsocketManager
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
 
@@ -234,6 +237,7 @@ def start_websocket():
             logging.error(f"WebSocket connection failed: {e}")
             logging.info("Reconnecting in 30 seconds...")
             time.sleep(30)  # Wait before reconnecting
+
 
 
 # Execute a Trade
@@ -251,8 +255,29 @@ def execute_trade(symbol, quantity, side):
     except Exception as e:
         logging.error(f"Error executing {side} order: {e}")
 
-# Start Flask and WebSocket
+# Signal Processing Loop
+def process_signals():
+    global last_signal_time
+    while True:
+        current_time = time.time()
+        if current_time - last_signal_time >= SIGNAL_INTERVAL:
+            if last_price is not None:
+                try:
+                    calculate_and_execute(last_price)
+                except Exception as e:
+                    logging.error(f"Error during signal processing: {e}", exc_info=True)
+            last_signal_time = current_time
+        time.sleep(1)  # Check every second, ensuring SIGNAL_INTERVAL is respected
+
+# Main Script Entry Point
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data before WebSocket starts
+
+    # Start Flask app in a separate thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
+
+    # Start Signal Processing Loop in a separate thread
+    Thread(target=process_signals, daemon=True).start()
+
+    # Start WebSocket for real-time data
     start_websocket()
