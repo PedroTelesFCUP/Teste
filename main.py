@@ -3,7 +3,7 @@ import time
 import numpy as np
 import pandas as pd
 import logging
-from flask import Flask
+from flask import Flask, request
 from threading import Thread
 from binance import ThreadedWebsocketManager
 from binance.client import Client
@@ -63,10 +63,18 @@ def download_logs():
         return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
-@app.route('/health')
+@app.route("/health")
 def health():
-    return "Healthy", 200
-    
+    return "OK", 200
+
+# Suppress logging for health checks
+@app.before_request
+def suppress_health_logging():
+    if "/health" in flask.request.path:
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+
+
 # Initialize Historical Data
 def initialize_historical_data():
     """Fetch historical data and calculate ATR values to initialize volatility and price buffers."""
