@@ -217,18 +217,18 @@ def start_websocket():
 # WebSocket Manager
 # WebSocket Manager
 def start_websocket():
-    while True:
+    """Starts the Binance WebSocket for real-time price data."""
+    while True:  # Keep the WebSocket running
         try:
             logging.info("Starting WebSocket connection...")
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
-            twm.join()
+            twm.join()  # Keep the WebSocket open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
             logging.info("Reconnecting in 30 seconds...")
-            time.sleep(30)
-
+            time.sleep(30)  # Wait before reconnecting
 
 # Signal Processing Loop
 def process_signals():
