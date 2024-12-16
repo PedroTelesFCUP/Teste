@@ -31,12 +31,15 @@ SYMBOL = "BTC/USD"
 ALPACA_SYMBOL = SYMBOL.replace("/", "")  # Alpaca doesn't use "/"
 BINANCE_SYMBOL = "BTCUSDT"
 
-# Logging Configuration
+
+# Logging Configuration: Write to both file and console
 logging.basicConfig(
-    filename="bot_logs.log",
-    filemode="w",
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("bot_logs.log"),  # Write to log file
+        logging.StreamHandler()              # Write to console/Render logs
+    ]
 )
 logging.info("Trading bot initialized.")
 
