@@ -70,7 +70,7 @@ def health():
 # Suppress logging for health checks
 @app.before_request
 def suppress_health_logging():
-    if "/health" in flask.request.path:
+    if "/health" in request.path:
         log = logging.getLogger('werkzeug')
         log.setLevel(logging.ERROR)
 
