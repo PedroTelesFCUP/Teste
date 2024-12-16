@@ -63,7 +63,10 @@ def download_logs():
         return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
-
+@app.route('/health')
+def health():
+    return "Healthy", 200
+    
 # Initialize Historical Data
 def initialize_historical_data():
     """Fetch historical data and calculate ATR values to initialize volatility and price buffers."""
