@@ -80,9 +80,17 @@ def plot_png():
     """Generate a plot dynamically and return it as a PNG image."""
     try:
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(close[-20:], label="Price", linestyle="-", marker="o", markersize=3)
-        ax.plot(upper_band_history[-20:], label="Upper Band", linestyle="--")
-        ax.plot(lower_band_history[-20:], label="Lower Band", linestyle="--")
+
+        # Plot only the last 20 points of close prices
+        if len(close) >= 20:
+            ax.plot(close[-20:], label="Price", linestyle="-", marker="o", markersize=3)
+            ax.plot(upper_band_history[-20:], label="Upper Band", linestyle="--")
+            ax.plot(lower_band_history[-20:], label="Lower Band", linestyle="--")
+        else:
+            ax.plot(close, label="Price", linestyle="-", marker="o", markersize=3)
+            ax.plot(upper_band_history, label="Upper Band", linestyle="--")
+            ax.plot(lower_band_history, label="Lower Band", linestyle="--")
+
         ax.set_title("Price and Bands Over Time")
         ax.set_xlabel("Time")
         ax.set_ylabel("Price")
@@ -97,6 +105,7 @@ def plot_png():
     except Exception as e:
         logging.error(f"Failed to generate plot: {e}")
         return "Failed to generate plot", 500
+
 
 @app.route('/analysis')
 def analysis():
@@ -123,10 +132,19 @@ def analysis():
 def dashboard():
     """Display a dashboard with the plot and analysis information."""
     return """
-    <h1>Trading Bot Dashboard</h1>
-    <img src="/plot.png" alt="Price and Bands Plot" style="width:80%;">
-    <iframe src="/analysis" style="width:80%; height:300px; border:none;"></iframe>
+    <html>
+        <head>
+            <title>Trading Bot Dashboard</title>
+            <meta http-equiv="refresh" content="300"> <!-- Refresh every 5 minutes -->
+        </head>
+        <body>
+            <h1>Trading Bot Dashboard</h1>
+            <img src="/plot.png" alt="Price and Bands Plot" style="width:80%;">
+            <iframe src="/analysis" style="width:80%; height:300px; border:none;"></iframe>
+        </body>
+    </html>
     """
+
 
 def wait_until_next_5min_interval():
     now = datetime.now()
@@ -301,22 +319,29 @@ def calculate_and_execute(price):
 # WebSocket Handler
 def on_message(msg):
     global last_price, high, low, close
-
     if 'k' not in msg:
         return
 
-    candle = msg['k']
-    last_price = float(candle['c'])
-    high.append(float(candle['h']))
-    low.append(float(candle['l']))
-    close.append(float(candle['c']))
+    candle = msg['k']  # Kline/candlestick data
+    is_candle_closed = candle['x']  # Whether this kline is closed
+    close_price = float(candle['c'])
 
-    if len(high) > ATR_LEN + 1:
-        high.pop(0)
-    if len(low) > ATR_LEN + 1:
-        low.pop(0)
-    if len(close) > ATR_LEN + 1:
-        close.pop(0)
+    # Update global last price
+    last_price = close_price
+
+    # Only update high, low, and close when the kline closes
+    if is_candle_closed:
+        high.append(float(candle['h']))
+        low.append(float(candle['l']))
+        close.append(close_price)
+
+        # Keep lists limited to the last 100 entries for memory efficiency
+        if len(high) > 100:
+            high.pop(0)
+        if len(low) > 100:
+            low.pop(0)
+        if len(close) > 100:
+            close.pop(0)
 
 # WebSocket Manager
 def start_websocket():
