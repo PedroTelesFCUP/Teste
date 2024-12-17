@@ -319,29 +319,38 @@ def calculate_and_execute(price):
 # WebSocket Handler
 def on_message(msg):
     global last_price, high, low, close
-    if 'k' not in msg:
-        return
+    try:
+        if 'k' not in msg:
+            logging.debug("Message received but does not contain kline data.")
+            return
 
-    candle = msg['k']  # Kline/candlestick data
-    is_candle_closed = candle['x']  # Whether this kline is closed
-    close_price = float(candle['c'])
+        candle = msg['k']  # Kline/candlestick data
+        is_candle_closed = candle['x']  # Whether this kline is closed
+        close_price = float(candle['c'])
 
-    # Update global last price
-    last_price = close_price
+        # Log received data
+        logging.debug(f"Received kline data: {candle}")
 
-    # Only update high, low, and close when the kline closes
-    if is_candle_closed:
-        high.append(float(candle['h']))
-        low.append(float(candle['l']))
-        close.append(close_price)
+        # Update global last price
+        last_price = close_price
 
-        # Keep lists limited to the last 100 entries for memory efficiency
-        if len(high) > 100:
-            high.pop(0)
-        if len(low) > 100:
-            low.pop(0)
-        if len(close) > 100:
-            close.pop(0)
+        # Only update high, low, and close when the kline closes
+        if is_candle_closed:
+            high.append(float(candle['h']))
+            low.append(float(candle['l']))
+            close.append(close_price)
+
+            # Keep lists limited to the last 100 entries for memory efficiency
+            if len(high) > 100:
+                high.pop(0)
+            if len(low) > 100:
+                low.pop(0)
+            if len(close) > 100:
+                close.pop(0)
+
+            logging.info(f"Updated 5-minute data: High={high[-1]}, Low={low[-1]}, Close={close[-1]}")
+    except Exception as e:
+        logging.error(f"Error in WebSocket message processing: {e}")
 
 # WebSocket Manager
 def start_websocket():
@@ -353,14 +362,17 @@ def start_websocket():
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
 
+            logging.info("WebSocket manager initialized.")
+
             # Start streaming 5-minute candles
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="5m")
+            logging.info("WebSocket subscription successful. Listening for messages...")
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info(f"Reconnecting in 30 seconds...")
+            logging.info("Reconnecting in 30 seconds...")
             time.sleep(30)  # Wait before reconnecting
-
+            
 # Signal Processing Loop
 def process_signals():
     global last_signal_time
