@@ -280,17 +280,18 @@ def start_websocket():
     while True:  # Keep the WebSocket running
         try:
             logging.info("Starting WebSocket connection...")
-            # Initialize ThreadedWebsocketManager
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
 
             # Start streaming 5-minute candles
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="5m")
+            logging.info("WebSocket subscription successful. Listening for messages...")
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info(f"Reconnecting in 30 seconds...")
-            time.sleep(30)  # Wait before reconnecting
+            logging.info("Reconnecting in 30 seconds...")
+            time.sleep(30)  # Retry after a delay
+
 
 # Signal Processing Loop
 def process_signals():
@@ -309,20 +310,14 @@ def process_signals():
 # Main Script Entry Point
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
+    wait_until_next_5min_interval()  # Align with 5-minute intervals
+    
+    port = int(os.getenv("PORT", 8080))  # Use dynamic port for Render
+    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
 
-    # Wait until the next 5-minute interval before starting the bot
-    wait_until_next_5min_interval()
-
-    # Start Flask app in a separate thread
-    Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
-    time.sleep(10)
-
-    # Start Signal Processing Loop in a separate thread
-    Thread(target=process_signals, daemon=True).start()
-
-    # Start WebSocket for real-time data
+    # Start WebSocket in a separate thread
     try:
-        start_websocket()
+        Thread(target=start_websocket, daemon=True).start()
     except Exception as e:
         logging.error(f"Critical failure in WebSocket connection: {e}. Restarting...")
         restart_program()
