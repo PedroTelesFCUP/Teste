@@ -69,7 +69,9 @@ def home():
 @app.route('/logs')
 def download_logs():
     try:
-        return send_file("bot_logs.log", as_attachment=True)
+        # Use the absolute path to ensure correct file location
+        log_file_path = "/home/render/project/src/bot_logs.log"
+        return send_file(log_file_path, as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
 
