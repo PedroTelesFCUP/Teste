@@ -310,10 +310,11 @@ def process_signals():
 # Main Script Entry Point
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
-    wait_until_next_5min_interval()  # Align with 5-minute intervals
+#    wait_until_next_5min_interval()  # Align with 5-minute intervals
     
-    port = int(os.getenv("PORT", 8080))  # Use dynamic port for Render
-    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
 
     # Start WebSocket in a separate thread
     try:
