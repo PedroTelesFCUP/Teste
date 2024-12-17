@@ -353,7 +353,9 @@ def process_signals():
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
     wait_until_next_5min_interval()  # Align with 5-minute intervals
-    Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
+    port = int(os.getenv("PORT", 5000))
+    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
+    
     time.sleep(10)
     Thread(target=process_signals, daemon=True).start()
     try:
