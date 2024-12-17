@@ -310,15 +310,20 @@ def process_signals():
 # Main Script Entry Point
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
-#    wait_until_next_5min_interval()  # Align with 5-minute intervals
-    
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
 
+    # Removed the wait_until_next_5min_interval() call
+    logging.info("Starting Flask app and signal processing...")
 
-    # Start WebSocket in a separate thread
+    # Start Flask app in a separate thread
+    Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
+    time.sleep(10)
+
+    # Start Signal Processing Loop in a separate thread
+    Thread(target=process_signals, daemon=True).start()
+
+    # Start WebSocket for real-time data
     try:
-        Thread(target=start_websocket, daemon=True).start()
+        start_websocket()
     except Exception as e:
         logging.error(f"Critical failure in WebSocket connection: {e}. Restarting...")
         restart_program()
