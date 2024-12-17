@@ -37,7 +37,7 @@ ATR_FACTOR = 3.0
 ALPACA_SYMBOL = "BTC/USD"
 BINANCE_SYMBOL = "BTCUSDT"
 QUANTITY = round(0.001, 8)
-SIGNAL_INTERVAL = 30  # Seconds
+SIGNAL_INTERVAL = 300  # Seconds
 
 # Logging Configuration
 logging.basicConfig(
@@ -73,6 +73,32 @@ def download_logs():
         return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
+
+import time
+from datetime import datetime, timedelta
+
+def wait_until_next_5min_interval():
+    """
+    Function to wait until just before the next 5-minute interval, starting 5 seconds earlier.
+    """
+    now = datetime.now()
+    # Calculate the next 5-minute interval
+    next_minute = (now.minute // 5 + 1) * 5
+    if next_minute == 60:  # Handle hour rollover
+        next_minute = 0
+        next_hour = now.hour + 1 if now.hour < 23 else 0
+        next_interval = now.replace(hour=next_hour, minute=next_minute, second=0, microsecond=0)
+    else:
+        next_interval = now.replace(minute=next_minute, second=0, microsecond=0)
+
+    # Calculate time to wait and adjust to start 5 seconds before the interval
+    wait_time = (next_interval - now).total_seconds() - 5
+    if wait_time > 0:
+        print(f"Waiting for {wait_time:.2f} seconds until the next 5-minute interval...")
+        time.sleep(wait_time)
+
+    print(f"Bot started at {datetime.now()} (5 seconds before the 5-minute interval).")
+
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
@@ -284,6 +310,9 @@ def process_signals():
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
 
+    # Wait until the next 5-minute interval before starting the bot
+    wait_until_next_5min_interval()
+
     # Start Flask app in a separate thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     time.sleep(10)
@@ -297,3 +326,4 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Critical failure in WebSocket connection: {e}. Restarting...")
         restart_program()
+
