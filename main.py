@@ -74,32 +74,6 @@ def download_logs():
     except FileNotFoundError:
         return "Log file not found.", 404
 
-import time
-from datetime import datetime, timedelta
-
-def wait_until_next_5min_interval():
-    """
-    Function to wait until just before the next 5-minute interval, starting 5 seconds earlier.
-    """
-    now = datetime.now()
-    # Calculate the next 5-minute interval
-    next_minute = (now.minute // 5 + 1) * 5
-    if next_minute == 60:  # Handle hour rollover
-        next_minute = 0
-        next_hour = now.hour + 1 if now.hour < 23 else 0
-        next_interval = now.replace(hour=next_hour, minute=next_minute, second=0, microsecond=0)
-    else:
-        next_interval = now.replace(minute=next_minute, second=0, microsecond=0)
-
-    # Calculate time to wait and adjust to start 5 seconds before the interval
-    wait_time = (next_interval - now).total_seconds() - 5
-    if wait_time > 0:
-        print(f"Waiting for {wait_time:.2f} seconds until the next 5-minute interval...")
-        time.sleep(wait_time)
-
-    print(f"Bot started at {datetime.now()} (5 seconds before the 5-minute interval).")
-
-
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
     if len(volatility) < n_clusters:
@@ -280,18 +254,17 @@ def start_websocket():
     while True:  # Keep the WebSocket running
         try:
             logging.info("Starting WebSocket connection...")
+            # Initialize ThreadedWebsocketManager
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
 
             # Start streaming 5-minute candles
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="5m")
-            logging.info("WebSocket subscription successful. Listening for messages...")
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info("Reconnecting in 30 seconds...")
-            time.sleep(30)  # Retry after a delay
-
+            logging.info(f"Reconnecting in 30 seconds...")
+            time.sleep(30)  # Wait before reconnecting
 
 # Signal Processing Loop
 def process_signals():
@@ -311,11 +284,8 @@ def process_signals():
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
 
-    # Removed the wait_until_next_5min_interval() call
-    logging.info("Starting Flask app and signal processing...")
-
     # Start Flask app in a separate thread
-    Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
+    Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     time.sleep(10)
 
     # Start Signal Processing Loop in a separate thread
@@ -327,4 +297,3 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Critical failure in WebSocket connection: {e}. Restarting...")
         restart_program()
-
