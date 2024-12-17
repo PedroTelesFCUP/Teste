@@ -167,6 +167,7 @@ def execute_trade(symbol, quantity, side):
 
 # Signal Processing
 def calculate_and_execute(price):
+    def calculate_and_execute(price):
     global last_direction, upper_band_history, lower_band_history
 
     if not volatility or len(volatility) < 3:
@@ -183,6 +184,7 @@ def calculate_and_execute(price):
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
+    # Update the band history
     upper_band_history.append(float(upper_band.iloc[-1]))
     lower_band_history.append(float(lower_band.iloc[-1]))
     if len(upper_band_history) > 4:
@@ -190,6 +192,19 @@ def calculate_and_execute(price):
     if len(lower_band_history) > 4:
         lower_band_history.pop(0)
 
+    # Check buy/sell conditions
+    buy_signal = any(price < band for band in lower_band_history)
+    sell_signal = any(price > band for band in upper_band_history)
+
+    # Determine the direction based on signals
+    if buy_signal:
+        direction = 1
+    elif sell_signal:
+        direction = -1
+    else:
+        direction = 0
+
+    # Logging
     logging.info(
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
@@ -203,13 +218,16 @@ def calculate_and_execute(price):
         f"========================="
     )
 
+    # Execute trade if direction changes
     if last_direction != direction:
         if direction == 1:
             execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
         elif direction == -1:
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
 
+    # Update last direction
     last_direction = direction
+
 
 # WebSocket Handler
 def on_message(msg):
