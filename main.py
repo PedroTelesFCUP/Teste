@@ -167,7 +167,6 @@ def execute_trade(symbol, quantity, side):
 
 # Signal Processing
 def calculate_and_execute(price):
-    def calculate_and_execute(price):
     global last_direction, upper_band_history, lower_band_history
 
     if not volatility or len(volatility) < 3:
