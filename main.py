@@ -3,15 +3,12 @@ import time
 import numpy as np
 import pandas as pd
 import logging
-from flask import Flask, send_file, Response
+from flask import Flask, send_file
 from threading import Thread
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from sklearn.cluster import KMeans
 from alpaca_trade_api.rest import REST  # Alpaca API
-from io import BytesIO
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
 
 def restart_program():
     """Restart the current program."""
@@ -21,6 +18,7 @@ def restart_program():
         os.execv(sys.executable, ['python'] + sys.argv)
     except Exception as e:
         print(f"Failed to restart program: {e}")
+
 
 # Alpaca API Credentials
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
@@ -71,96 +69,36 @@ def home():
 @app.route('/logs')
 def download_logs():
     try:
+        # Use the absolute path to ensure correct file location
         return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
 
-@app.route('/plot.png')
-def plot_png():
-    """Generate a plot dynamically and return it as a PNG image."""
-    try:
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        # Plot only the last 20 points of close prices
-        if len(close) >= 20:
-            ax.plot(close[-20:], label="Price", linestyle="-", marker="o", markersize=3)
-            ax.plot(upper_band_history[-20:], label="Upper Band", linestyle="--")
-            ax.plot(lower_band_history[-20:], label="Lower Band", linestyle="--")
-        else:
-            ax.plot(close, label="Price", linestyle="-", marker="o", markersize=3)
-            ax.plot(upper_band_history, label="Upper Band", linestyle="--")
-            ax.plot(lower_band_history, label="Lower Band", linestyle="--")
-
-        ax.set_title("Price and Bands Over Time")
-        ax.set_xlabel("Time")
-        ax.set_ylabel("Price")
-        ax.legend()
-        ax.grid(True)
-
-        output = BytesIO()
-        plt.savefig(output, format="png")
-        output.seek(0)
-        plt.close(fig)
-        return Response(output, mimetype="image/png")
-    except Exception as e:
-        logging.error(f"Failed to generate plot: {e}")
-        return "Failed to generate plot", 500
-
-
-@app.route('/analysis')
-def analysis():
-    """Return the current volatility and clustering information as HTML."""
-    try:
-        centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
-        atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-        analysis_html = f"""
-        <h1>Current Analysis</h1>
-        <table border="1">
-            <tr><th>Metric</th><th>Value</th></tr>
-            <tr><td>Volatility Level</td><td>{volatility_level}</td></tr>
-            <tr><td>ATR Value</td><td>{atr:.2f}</td></tr>
-            <tr><td>Cluster Centroids</td><td>{', '.join(f'{x:.2f}' for x in centroids)}</td></tr>
-            <tr><td>Cluster Sizes</td><td>{', '.join(str(size) for size in cluster_sizes)}</td></tr>
-        </table>
-        """
-        return analysis_html
-    except Exception as e:
-        logging.error(f"Failed to generate analysis: {e}")
-        return "Failed to generate analysis", 500
-
-@app.route('/dashboard')
-def dashboard():
-    """Display a dashboard with the plot and analysis information."""
-    return """
-    <html>
-        <head>
-            <title>Trading Bot Dashboard</title>
-            <meta http-equiv="refresh" content="300"> <!-- Refresh every 5 minutes -->
-        </head>
-        <body>
-            <h1>Trading Bot Dashboard</h1>
-            <img src="/plot.png" alt="Price and Bands Plot" style="width:80%;">
-            <iframe src="/analysis" style="width:80%; height:300px; border:none;"></iframe>
-        </body>
-    </html>
-    """
-
+import time
+from datetime import datetime, timedelta
 
 def wait_until_next_5min_interval():
+    """
+    Function to wait until just before the next 5-minute interval, starting 5 seconds earlier.
+    """
     now = datetime.now()
+    # Calculate the next 5-minute interval
     next_minute = (now.minute // 5 + 1) * 5
-    if next_minute == 60:
+    if next_minute == 60:  # Handle hour rollover
         next_minute = 0
         next_hour = now.hour + 1 if now.hour < 23 else 0
         next_interval = now.replace(hour=next_hour, minute=next_minute, second=0, microsecond=0)
     else:
         next_interval = now.replace(minute=next_minute, second=0, microsecond=0)
 
+    # Calculate time to wait and adjust to start 5 seconds before the interval
     wait_time = (next_interval - now).total_seconds() - 5
     if wait_time > 0:
         print(f"Waiting for {wait_time:.2f} seconds until the next 5-minute interval...")
         time.sleep(wait_time)
+
     print(f"Bot started at {datetime.now()} (5 seconds before the 5-minute interval).")
+
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
@@ -319,38 +257,22 @@ def calculate_and_execute(price):
 # WebSocket Handler
 def on_message(msg):
     global last_price, high, low, close
-    try:
-        if 'k' not in msg:
-            logging.debug("Message received but does not contain kline data.")
-            return
 
-        candle = msg['k']  # Kline/candlestick data
-        is_candle_closed = candle['x']  # Whether this kline is closed
-        close_price = float(candle['c'])
+    if 'k' not in msg:
+        return
 
-        # Log received data
-        logging.debug(f"Received kline data: {candle}")
+    candle = msg['k']
+    last_price = float(candle['c'])
+    high.append(float(candle['h']))
+    low.append(float(candle['l']))
+    close.append(float(candle['c']))
 
-        # Update global last price
-        last_price = close_price
-
-        # Only update high, low, and close when the kline closes
-        if is_candle_closed:
-            high.append(float(candle['h']))
-            low.append(float(candle['l']))
-            close.append(close_price)
-
-            # Keep lists limited to the last 100 entries for memory efficiency
-            if len(high) > 100:
-                high.pop(0)
-            if len(low) > 100:
-                low.pop(0)
-            if len(close) > 100:
-                close.pop(0)
-
-            logging.info(f"Updated 5-minute data: High={high[-1]}, Low={low[-1]}, Close={close[-1]}")
-    except Exception as e:
-        logging.error(f"Error in WebSocket message processing: {e}")
+    if len(high) > ATR_LEN + 1:
+        high.pop(0)
+    if len(low) > ATR_LEN + 1:
+        low.pop(0)
+    if len(close) > ATR_LEN + 1:
+        close.pop(0)
 
 # WebSocket Manager
 def start_websocket():
@@ -362,17 +284,14 @@ def start_websocket():
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
 
-            logging.info("WebSocket manager initialized.")
-
             # Start streaming 5-minute candles
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="5m")
-            logging.info("WebSocket subscription successful. Listening for messages...")
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info("Reconnecting in 30 seconds...")
+            logging.info(f"Reconnecting in 30 seconds...")
             time.sleep(30)  # Wait before reconnecting
-            
+
 # Signal Processing Loop
 def process_signals():
     global last_signal_time
@@ -387,18 +306,24 @@ def process_signals():
             last_signal_time = current_time
         time.sleep(1)  # Check every second, respecting SIGNAL_INTERVAL
 
+# Main Script Entry Point
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
-    wait_until_next_5min_interval()  # Align with 5-minute intervals
-    port = int(os.getenv("PORT", 5000))
-    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
-    
+
+    # Wait until the next 5-minute interval before starting the bot
+    wait_until_next_5min_interval()
+
+    # Start Flask app in a separate thread
+    Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     time.sleep(10)
+
+    # Start Signal Processing Loop in a separate thread
     Thread(target=process_signals, daemon=True).start()
+
+    # Start WebSocket for real-time data
     try:
         start_websocket()
     except Exception as e:
         logging.error(f"Critical failure in WebSocket connection: {e}. Restarting...")
         restart_program()
-
 
