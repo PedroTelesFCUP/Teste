@@ -396,7 +396,7 @@ def refresh_dashboard(n):
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price, high, low, close, last_label, current_label
+    global last_price, high, low, close, last_label, current_label, last_direction
 
     if 'k' not in msg:
         return
@@ -407,32 +407,6 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
-    # Update last_label
-    last_label = current_label
-
-    # Determine the current label based on price relative to the bands
-    if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
-        if last_price < lower_band_300_history[-1]:
-            current_label = "green"  # Indicates potential buy signal
-        elif last_price > upper_band_300_history[-1]:
-            current_label = "red"  # Indicates potential sell signal
-        else:
-            # Assign based on trend as fallback
-            if last_direction == 1:
-                current_label = "green"  # Bullish trend fallback
-            elif last_direction == -1:
-                current_label = "red"  # Bearish trend fallback
-            else:
-                current_label = None  # No trend direction
-    else:
-        # Not enough band history, fallback to trend direction
-        if last_direction == 1:
-            current_label = "green"
-        elif last_direction == -1:
-            current_label = "red"
-        else:
-            current_label = None
-
     # Manage high, low, and close lists to avoid excessive memory usage
     if len(high) > ATR_LEN + 1:
         high.pop(0)
@@ -440,6 +414,36 @@ def on_message(msg):
         low.pop(0)
     if len(close) > ATR_LEN + 1:
         close.pop(0)
+
+    # Calculate direction for the first cycle if it hasn't been set
+    if last_direction is None and len(close) > 1:
+        if close[-1] > close[-2]:
+            last_direction = 1  # Bullish
+        elif close[-1] < close[-2]:
+            last_direction = -1  # Bearish
+        else:
+            last_direction = None  # Neutral, although unlikely with two different prices
+        logging.info(f"Initial direction calculated: {last_direction}")
+
+    # Update last_label to the previous value of current_label
+    last_label = current_label
+
+    # Update current_label based on the last price relative to the bands
+    if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
+        if last_price < lower_band_300_history[-1]:
+            current_label = "green"  # Indicates potential buy signal
+        elif last_price > upper_band_300_history[-1]:
+            current_label = "red"  # Indicates potential sell signal
+        else:
+            # Assign based on trend direction as a fallback
+            current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
+    else:
+        # Fallback when there are no bands yet
+        current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
+
+    # Log the updated labels for monitoring
+    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
+
 
 
 # WebSocket Manager
