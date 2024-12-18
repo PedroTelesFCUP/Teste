@@ -3,6 +3,7 @@ import time
 import numpy as np
 import pandas as pd
 import logging
+import datetime
 from flask import Flask, send_file
 from threading import Thread
 from binance import ThreadedWebsocketManager
@@ -316,25 +317,35 @@ def start_websocket():
 
 def process_signals():
     global last_signal_time, last_heartbeat_time
+
+    # Align to the next 30-second mark minus a few seconds (e.g., 3 seconds before)
+    now = datetime.datetime.now()
+    next_heartbeat = now + datetime.timedelta(seconds=(30 - now.second % 30))
+    sync_offset = 3  # Start a few seconds earlier
+    next_heartbeat_delay = max(0, (next_heartbeat - now).total_seconds() - sync_offset)
+    logging.info(f"Synchronizing to next heartbeat in {next_heartbeat_delay:.2f} seconds.")
+    time.sleep(next_heartbeat_delay)
+
     while True:
         current_time = time.time()
 
-        # Check for signal processing (every 300 seconds)
-        if current_time - last_signal_time >= SIGNAL_INTERVAL:
+        # Check for signal processing (every 300 seconds, starting slightly earlier)
+        if current_time - last_signal_time >= SIGNAL_INTERVAL - sync_offset:
             if last_price is not None:
                 try:
                     calculate_and_execute(last_price)
                 except Exception as e:
                     logging.error(f"Error during signal processing: {e}", exc_info=True)
-            last_signal_time = current_time
-            last_heartbeat_time = current_time  # Skip heartbeat logging at this time
+            last_signal_time = current_time + sync_offset  # Adjust for sync offset
+            last_heartbeat_time = current_time + sync_offset  # Skip heartbeat logging at this time
 
-        # Check for heartbeat logging (every 30 seconds)
-        elif current_time - last_heartbeat_time >= 30:
+        # Check for heartbeat logging (every 30 seconds, starting slightly earlier)
+        elif current_time - last_heartbeat_time >= 30 - sync_offset:
             heartbeat_logging()  # Just logs the state
-            last_heartbeat_time = current_time
+            last_heartbeat_time = current_time + sync_offset
 
-        time.sleep(1)  # Sleep for 1 second to avoid excessive CPU usage
+        # Sleep for a small interval to avoid excessive CPU usage
+        time.sleep(1)
 
 
 # Main Script Entry Point
