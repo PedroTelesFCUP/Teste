@@ -197,7 +197,12 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     upper_band = upper_band.where(upper_band < prev_upper_band, prev_upper_band)
 
     # Direction is either 1 (bullish) or -1 (bearish)
-    direction = 1 if close.iloc[-1] < lower_band.iloc[-1] else -1
+    direction = None
+    if close.iloc[-1] < lower_band.iloc[-1]:
+        direction = 1  # Bullish
+    elif close.iloc[-1] > upper_band.iloc[-1]:
+        direction = -1  # Bearish
+
 
     return direction, upper_band, lower_band
 
@@ -255,7 +260,7 @@ def heartbeat_logging():
             f"Volatility Level: {volatility_level}\n"
             f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
             f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-            f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+            f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
             f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
             f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
             f"=========================="
@@ -313,6 +318,7 @@ def calculate_and_execute(price):
 
     # Detect pullback signals
     pullback_buy = last_label == "red" and current_label == "green" and is_bullish
+    logging.info(f"Pullback Buy Conditions: Last Label: {last_label}, Current Label: {current_label}, Is Bullish: {is_bullish}")
 
     # Logging
     logging.info(
@@ -359,8 +365,8 @@ def update_dashboard():
 
     # Create table rows for metrics
     metrics = [
-        ["Last Price", f"{last_price:.2f}" if last_price else "N/A"],
-        ["Direction", f"{'Bullish' if last_direction == 1 else 'Bearish' if last_direction == -1 else 'Neutral'}"],
+        ["Last Price", f"{last_price:.2f}" if last_price is not None else "N/A"],
+        ["Direction", f"{'Bullish (1)' if last_direction == 1 else 'Bearish (-1)' if last_direction == -1 else 'N/A'}"],
         ["Upper Band", f"{upper_band_history[-1]:.2f}" if upper_band_history else "N/A"],
         ["Lower Band", f"{lower_band_history[-1]:.2f}" if lower_band_history else "N/A"],
         ["High (last)", f"{high[-1]:.2f}" if high else "N/A"],
@@ -369,6 +375,7 @@ def update_dashboard():
     rows = [html.Tr([html.Th(metric[0]), html.Td(metric[1])]) for metric in metrics]
 
     return fig, rows
+
 
 @dash_app.callback(
     [Output('price-chart', 'figure'),
@@ -390,6 +397,11 @@ def on_message(msg):
     high.append(float(candle['h']))
     low.append(float(candle['l']))
     close.append(float(candle['c']))
+
+    if not upper_band_300_history or not lower_band_300_history:
+        logging.warning("Insufficient data to calculate labels. Skipping label update.")
+        return
+
 
     # Ensure there are enough values to calculate the labels
     if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
@@ -424,7 +436,9 @@ def on_message(msg):
 # WebSocket Manager
 def start_websocket():
     """Starts the Binance WebSocket for real-time price data."""
-    while True:  # Keep the WebSocket running
+    retry_count = 0
+    max_retries = 5
+    while retry_count < max_retries:
         try:
             logging.info("Starting WebSocket connection...")
             # Initialize ThreadedWebsocketManager
@@ -435,9 +449,15 @@ def start_websocket():
             twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
+            retry_count += 1
             logging.error(f"WebSocket connection failed: {e}")
-            logging.info(f"Reconnecting in 30 seconds...")
-            time.sleep(30)  # Wait before reconnecting
+            if retry_count >= max_retries:
+                logging.error("WebSocket failed after maximum retries. Exiting...")
+                break
+            logging.info(f"Retrying connection ({retry_count}/{max_retries})...")
+            time.sleep(30)
+
+
 
 def process_signals():
     global last_signal_time, last_heartbeat_time
