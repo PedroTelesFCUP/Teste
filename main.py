@@ -426,11 +426,7 @@ def on_message(msg):
         last_label = None
 
 
-    # Log the labels for debugging
-    logging.info(
-        f"Last Price: {last_price}, Last Label: {last_label}, Current Label: {current_label}"
-    )
-
+   
     # Manage high, low, and close lists to avoid excessive memory usage
     if len(high) > ATR_LEN + 1:
         high.pop(0)
