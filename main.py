@@ -405,28 +405,29 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
-   # Ensure there are enough values to calculate the labels
+    # Ensure there are enough values to calculate the labels
     if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
-        # Assign previous label to last_label
-        if 'current_label' in globals() and current_label is not None:
-            last_label = current_label
-        else:
-            last_label = None  # Default for the first iterations
+        # Update last_label
+        last_label = current_label if current_label is not None else None
 
-    # Determine the current label based on price relative to the bands
+        # Determine the current label based on price relative to the bands
         if last_price < lower_band_300_history[-1]:
             current_label = "green"  # Indicates potential buy signal
         elif last_price > upper_band_300_history[-1]:
             current_label = "red"  # Indicates potential sell signal
         else:
-            current_label = None  # No signal
+            # Assign based on trend as fallback
+            if last_direction == 1:
+                current_label = "green"  # Bullish trend fallback
+            elif last_direction == -1:
+                current_label = "red"  # Bearish trend fallback
+
+        logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
     else:
-        logging.info("Not enough band history for labels. Skipping label update this time.")
+        logging.warning("Insufficient band history for label updates. Skipping.")
         current_label = None
         last_label = None
 
-
-   
     # Manage high, low, and close lists to avoid excessive memory usage
     if len(high) > ATR_LEN + 1:
         high.pop(0)
@@ -434,7 +435,6 @@ def on_message(msg):
         low.pop(0)
     if len(close) > ATR_LEN + 1:
         close.pop(0)
-
 
 # WebSocket Manager
 def start_websocket():
