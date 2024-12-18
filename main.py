@@ -407,24 +407,23 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
-    # Ensure there are enough values to calculate the labels
-
     # Update last_label
     last_label = current_label
 
     # Determine the current label based on price relative to the bands
-    if last_price < lower_band_300_history[-1]:
-        current_label = "green"  # Indicates potential buy signal
-    elif last_price > upper_band_300_history[-1]:
-        current_label = "red"  # Indicates potential sell signal
-    else:
-        # Assign based on trend as fallback
-        if last_direction == 1:
-            current_label = "green"  # Bullish trend fallback
-        elif last_direction == -1:
-            current_label = "red"  # Bearish trend fallback
+    if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
+        if last_price < lower_band_300_history[-1]:
+            current_label = "green"  # Indicates potential buy signal
+        elif last_price > upper_band_300_history[-1]:
+            current_label = "red"  # Indicates potential sell signal
         else:
-            current_label = None  # No trend direction
+            # Assign based on trend as fallback
+            if last_direction == 1:
+                current_label = "green"  # Bullish trend fallback
+            elif last_direction == -1:
+                current_label = "red"  # Bearish trend fallback
+            else:
+                current_label = None  # No trend direction
     else:
         # Not enough band history, fallback to trend direction
         if last_direction == 1:
@@ -434,8 +433,6 @@ def on_message(msg):
         else:
             current_label = None
 
-        last_label = current_label  # Update last_label to maintain state
-
     # Manage high, low, and close lists to avoid excessive memory usage
     if len(high) > ATR_LEN + 1:
         high.pop(0)
@@ -444,6 +441,8 @@ def on_message(msg):
     if len(close) > ATR_LEN + 1:
         close.pop(0)
 
+    # Log the labels for monitoring
+    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
 
 # WebSocket Manager
 def start_websocket():
