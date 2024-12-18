@@ -417,7 +417,7 @@ def on_message(msg):
         close.pop(0)
 
     # Calculate direction for the first cycle if it hasn't been set
-    if not initial_direction_calculated and last_direction is None and len(close) > 1:
+    if not initial_direction_calculated and last_direction is None and len(close) > 10:
         if close[-1] > close[-10]:
             last_direction = 1  # Bullish
         elif close[-1] < close[-10]:
