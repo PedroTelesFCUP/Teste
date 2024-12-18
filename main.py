@@ -397,7 +397,7 @@ def refresh_dashboard(n):
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price, high, low, close, last_label, current_label, last_direction
+    global last_price, high, low, close, last_label, current_label, last_direction, initial_direction_calculated
 
     if 'k' not in msg:
         return
@@ -442,6 +442,7 @@ def on_message(msg):
     else:
         # Fallback when there are no bands yet
         current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
+
 
     
 
