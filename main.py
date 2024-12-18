@@ -441,8 +441,6 @@ def on_message(msg):
     if len(close) > ATR_LEN + 1:
         close.pop(0)
 
-    # Log the labels for monitoring
-    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
 
 # WebSocket Manager
 def start_websocket():
