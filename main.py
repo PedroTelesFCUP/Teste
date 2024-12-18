@@ -128,7 +128,7 @@ dash_app.layout = html.Div([
 def cluster_volatility(volatility, n_clusters=3):
     if len(volatility) < n_clusters:
         logging.warning("Not enough data points for clustering. Skipping.")
-        return None, None, None, None, None, False  # Added False for `is_cluster_3_dominant`
+        return None, None, None, None, None, False
 
     try:
         # Perform KMeans clustering
@@ -140,18 +140,23 @@ def cluster_volatility(volatility, n_clusters=3):
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
         latest_volatility = volatility[-1][0]
-        assigned_cluster = kmeans.predict([[latest_volatility]])[0]
-        assigned_centroid = centroids[assigned_cluster]
-        cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
-        volatility_level = assigned_cluster + 1
 
-        # Determine if Cluster 3 (index 2) is dominant
+        # Sort centroids to ensure Cluster 3 is the highest volatility
+        sorted_indices = np.argsort(centroids)  # Ascending order
+        cluster_mapping = {old: new for new, old in enumerate(sorted_indices)}
+        labels = np.array([cluster_mapping[label] for label in labels])  # Re-map labels
+        assigned_cluster = cluster_mapping[kmeans.predict([[latest_volatility]])[0]]
+        assigned_centroid = centroids[sorted_indices[assigned_cluster]]
+
+        cluster_sizes = [np.sum(labels == i) for i in range(n_clusters)]
         is_cluster_3_dominant = cluster_sizes[2] == max(cluster_sizes) if len(cluster_sizes) > 2 else False
 
-        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant
+        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, assigned_cluster + 1, is_cluster_3_dominant
     except Exception as e:
         logging.error(f"Clustering failed: {e}")
         return None, None, None, None, None, False
+
+
 
 # Calculate ATR
 def calculate_atr(high, low, close):
