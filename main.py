@@ -441,8 +441,6 @@ def on_message(msg):
         # Fallback when there are no bands yet
         current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
 
-    # Log the updated labels for monitoring
-    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
 
 
 
