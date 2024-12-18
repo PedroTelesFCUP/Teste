@@ -41,7 +41,7 @@ ATR_FACTOR = 2.5
 ALPACA_SYMBOL = "BTC/USD"
 BINANCE_SYMBOL = "BTCUSDT"
 QUANTITY = round(0.001, 8)
-SIGNAL_INTERVAL = 30  # Seconds
+SIGNAL_INTERVAL = 60  # Seconds
 
 # Logging Configuration
 logging.basicConfig(
