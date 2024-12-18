@@ -289,11 +289,6 @@ def calculate_and_execute(price):
         logging.warning("Clustering failed. Skipping cycle.")
         return
 
-    # Check if Cluster 3 is dominant before proceeding
-    if not is_cluster_3_dominant:
-        logging.warning("Cluster 3 is not dominant. Skipping potential trade.")
-        return
-
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
     direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
@@ -340,6 +335,9 @@ def calculate_and_execute(price):
         f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
         f"========================="
     )
+    # Check if Cluster 3 is dominant before proceeding with trade logic
+    if not is_cluster_3_dominant:
+        logging.warning("Cluster 3 is not dominant. Skipping potential trade.")
 
     # Combine all conditions for a buy signal
     if pullback_buy and is_cluster_3_dominant:
