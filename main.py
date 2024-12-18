@@ -63,6 +63,8 @@ last_log_time = 0  # New variable for heartbeat logs
 high, low, close = [], [], []
 upper_band_history = []
 lower_band_history = []
+upper_band_300_history = []  # Stores only the 300-second upper bands
+lower_band_300_history = []  # Stores only the 300-second lower bands
 
 # Flask Server
 app = Flask(__name__)
@@ -229,8 +231,8 @@ def heartbeat_logging():
             f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
             f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
             f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
-            f"Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_history)}\n"
-            f"Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_history)}\n"
+            f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
+            f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
             f"=========================="
         )
     except Exception as e:
@@ -238,12 +240,13 @@ def heartbeat_logging():
 
 # Signal Processing
 def calculate_and_execute(price):
-    global last_direction, upper_band_history, lower_band_history
+    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history
 
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
 
+    # Perform clustering and calculate bands
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
@@ -254,17 +257,19 @@ def calculate_and_execute(price):
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
-    # Update the band history
-    upper_band_history.append(float(upper_band.iloc[-1]))
-    lower_band_history.append(float(lower_band.iloc[-1]))
-    if len(upper_band_history) > 4:
-        upper_band_history.pop(0)
-    if len(lower_band_history) > 4:
-        lower_band_history.pop(0)
+    # Update the 300-second band history
+    upper_band_300_history.append(float(upper_band.iloc[-1]))
+    lower_band_300_history.append(float(lower_band.iloc[-1]))
 
-    # Check buy/sell conditions
-    buy_signal = any(price < band for band in lower_band_history)
-    sell_signal = any(price > band for band in upper_band_history)
+    # Keep only the last 4 values
+    if len(upper_band_300_history) > 4:
+        upper_band_300_history.pop(0)
+    if len(lower_band_300_history) > 4:
+        lower_band_300_history.pop(0)
+
+    # Check buy/sell conditions based on the 300-second bands
+    buy_signal = any(price < band for band in lower_band_300_history)
+    sell_signal = any(price > band for band in upper_band_300_history)
 
     # Determine the direction based on signals
     if buy_signal:
@@ -283,8 +288,8 @@ def calculate_and_execute(price):
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
         f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
-        f"Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_history)}\n"
-        f"Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_history)}\n"
+        f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
+        f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
         f"========================="
     )
 
@@ -297,6 +302,7 @@ def calculate_and_execute(price):
 
     # Update last direction
     last_direction = direction
+
 
 # Update dash
 def update_dashboard():
