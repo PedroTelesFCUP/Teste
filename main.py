@@ -76,6 +76,8 @@ entry_price = None
 trade_direction = None  # 1 for buy, -1 for sell
 last_label = None  # Initialize last_label to None
 current_label = None  # Initialize current_label to None
+entry_price = None
+take_profit_price = None
 
 # Flask Server
 app = Flask(__name__)
@@ -277,7 +279,7 @@ def heartbeat_logging():
 
 # Signal Processing
 def calculate_and_execute(price):
-    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history
+    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history, entry_price, take_profit_price
 
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
