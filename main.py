@@ -78,6 +78,7 @@ last_label = None  # Initialize last_label to None
 current_label = None  # Initialize current_label to None
 entry_price = None
 take_profit_price = None
+initial_direction_calculated = False  # New flag to suppress repeated messages
 
 # Flask Server
 app = Flask(__name__)
@@ -416,7 +417,7 @@ def on_message(msg):
         close.pop(0)
 
     # Calculate direction for the first cycle if it hasn't been set
-    if last_direction is None and len(close) > 1:
+    if not initial_direction_calculated and last_direction is None and len(close) > 1:
         if close[-1] > close[-2]:
             last_direction = 1  # Bullish
         elif close[-1] < close[-2]:
@@ -424,6 +425,7 @@ def on_message(msg):
         else:
             last_direction = None  # Neutral, although unlikely with two different prices
         logging.info(f"Initial direction calculated: {last_direction}")
+        initial_direction_calculated = True
 
     # Update last_label to the previous value of current_label
     last_label = current_label
@@ -441,7 +443,7 @@ def on_message(msg):
         # Fallback when there are no bands yet
         current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
 
-
+    
 
 
 # WebSocket Manager
