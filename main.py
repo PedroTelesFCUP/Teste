@@ -403,7 +403,7 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
-    if not upper_band_300_history or not lower_band_300_history:
+    if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
         logging.warning("Insufficient data to calculate labels. Skipping label update.")
         return
 
