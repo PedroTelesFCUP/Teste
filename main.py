@@ -266,6 +266,7 @@ def heartbeat_logging():
             f"\n=== Heartbeat Logging ===\n"
             f"Price: {last_price:.2f}\n"
             f"ATR: {atr:.2f}\n"
+            f"Last Label: {last_label}, Current Label: {current_label}\n"
             f"Volatility Level: {volatility_level}\n"
             f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
             f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
@@ -329,6 +330,7 @@ def calculate_and_execute(price):
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
+        f"Last Label: {last_label}, Current Label: {current_label}\n"
         f"Volatility Level: {volatility_level}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
@@ -433,9 +435,6 @@ def on_message(msg):
             current_label = None
 
         last_label = current_label  # Update last_label to maintain state
-
-    # Logging label updates
-    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
 
     # Manage high, low, and close lists to avoid excessive memory usage
     if len(high) > ATR_LEN + 1:
