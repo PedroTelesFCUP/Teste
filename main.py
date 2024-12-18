@@ -74,6 +74,8 @@ upper_band_300_history = []  # Stores only the 300-second upper bands
 lower_band_300_history = []  # Stores only the 300-second lower bands
 entry_price = None
 trade_direction = None  # 1 for buy, -1 for sell
+last_label = None  # Initialize last_label to None
+current_label = None  # Initialize current_label to None
 
 # Flask Server
 app = Flask(__name__)
@@ -403,18 +405,15 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
-    if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
+    if len(upper_band_300_history) == 0 or len(lower_band_300_history) == 0:
         logging.warning("Insufficient data to calculate labels. Skipping label update.")
         return
-
 
     # Ensure there are enough values to calculate the labels
     if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
         # Assign previous label to last_label
-        if 'current_label' in globals():
+        if current_label is not None:
             last_label = current_label
-        else:
-            last_label = None  # Initialize last_label if not set
 
         # Determine the current label based on price relative to the bands
         if last_price < lower_band_300_history[-1]:
