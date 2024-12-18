@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 import logging
 import datetime
+from dash import Dash, dcc, html
+import plotly.graph_objs as go
+from dash.dependencies import Input, Output
 from flask import Flask, send_file
 from threading import Thread
 from binance import ThreadedWebsocketManager
@@ -75,6 +78,25 @@ def download_logs():
         return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
+
+# Initialize dash app
+dash_app = Dash(
+    __name__,
+    server=app,
+    url_base_pathname="/dashboard/"
+)
+
+dash_app.layout = html.Div([
+    html.H1("Trading Bot Dashboard", style={'text-align': 'center'}),
+    dcc.Graph(id='price-chart', style={'height': '50vh'}),
+    html.H3("Metrics Table", style={'margin-top': '20px'}),
+    html.Table(id='metrics-table', style={'width': '100%', 'border': '1px solid black'}),
+    dcc.Interval(
+        id='update-interval',
+        interval=30 * 1000,  # Refresh every 30 seconds
+        n_intervals=0
+    )
+])
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
@@ -276,6 +298,36 @@ def calculate_and_execute(price):
     # Update last direction
     last_direction = direction
 
+# Update dash
+def update_dashboard():
+    global high, low, close, upper_band_history, lower_band_history, last_price, last_direction
+
+    # Create price and bands chart
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(y=close[-10:], mode='lines', name='Price', line=dict(color='blue')))
+    fig.add_trace(go.Scatter(y=upper_band_history[-10:], mode='lines', name='Upper Band', line=dict(color='green')))
+    fig.add_trace(go.Scatter(y=lower_band_history[-10:], mode='lines', name='Lower Band', line=dict(color='red')))
+
+    # Create table rows for metrics
+    metrics = [
+        ["Last Price", f"{last_price:.2f}" if last_price else "N/A"],
+        ["Direction", f"{'Bullish' if last_direction == 1 else 'Bearish' if last_direction == -1 else 'Neutral'}"],
+        ["Upper Band", f"{upper_band_history[-1]:.2f}" if upper_band_history else "N/A"],
+        ["Lower Band", f"{lower_band_history[-1]:.2f}" if lower_band_history else "N/A"],
+        ["High (last)", f"{high[-1]:.2f}" if high else "N/A"],
+        ["Low (last)", f"{low[-1]:.2f}" if low else "N/A"]
+    ]
+    rows = [html.Tr([html.Th(metric[0]), html.Td(metric[1])]) for metric in metrics]
+
+    return fig, rows
+
+@dash_app.callback(
+    [Output('price-chart', 'figure'),
+     Output('metrics-table', 'children')],
+    [Input('update-interval', 'n_intervals')]
+)
+def refresh_dashboard(n):
+    return update_dashboard()
 
 # WebSocket Handler
 def on_message(msg):
