@@ -196,12 +196,8 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     lower_band = lower_band.where(lower_band > prev_lower_band, prev_lower_band)
     upper_band = upper_band.where(upper_band < prev_upper_band, prev_upper_band)
 
-    if close.iloc[-1] > upper_band.iloc[-1]:
-        direction = -1
-    elif close.iloc[-1] < lower_band.iloc[-1]:
-        direction = 1
-    else:
-        direction = 0
+    # Direction is either 1 (bullish) or -1 (bearish)
+    direction = 1 if close.iloc[-1] < lower_band.iloc[-1] else -1
 
     return direction, upper_band, lower_band
 
@@ -274,7 +270,6 @@ def calculate_and_execute(price):
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
-        
 
     # Perform clustering and calculate bands
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant = cluster_volatility(volatility)
@@ -286,7 +281,7 @@ def calculate_and_execute(price):
     if not is_cluster_3_dominant:
         logging.warning("Cluster 3 is not dominant. Skipping potential trade.")
         return
-        
+
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
     direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
@@ -302,8 +297,6 @@ def calculate_and_execute(price):
     if len(lower_band_300_history) > 4:
         lower_band_300_history.pop(0)
 
-    
-
     # Check buy/sell conditions based on the 300-second bands
     buy_signal = any(price < band for band in lower_band_300_history)
     sell_signal = any(price > band for band in upper_band_300_history)
@@ -313,8 +306,6 @@ def calculate_and_execute(price):
         direction = 1
     elif sell_signal:
         direction = -1
-    else:
-        direction = 0
 
     # Use the first Supertrend (direction) for overall trend confirmation
     is_bullish = direction == 1  # Green cloud indicates a bullish trend
@@ -322,7 +313,6 @@ def calculate_and_execute(price):
 
     # Detect pullback signals
     pullback_buy = last_label == "red" and current_label == "green" and is_bullish
-    pullback_sell = last_label == "green" and current_label == "red" and is_bearish
 
     # Logging
     logging.info(
@@ -332,7 +322,7 @@ def calculate_and_execute(price):
         f"Volatility Level: {volatility_level}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+        f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
         f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
         f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
         f"========================="
@@ -351,12 +341,7 @@ def calculate_and_execute(price):
         if last_price >= take_profit_price:  # Take profit for buy
             logging.info(f"Take profit reached at {last_price:.2f}. Closing long position.")
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-            entry_price = None  # Reset entry price
-            take_profit_price = None  # Reset take profit level
-            last_direction = 0  # Reset direction to neutral
-            reset_trade()
-
-    
+            reset_trade()  # Reset trade state
 
     # Update last direction
     last_direction = direction
