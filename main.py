@@ -81,6 +81,21 @@ def download_logs():
     except FileNotFoundError:
         return "Log file not found.", 404
 
+from flask import request, Response
+
+def authenticate():
+    """Sends a 401 response that enables basic auth"""
+    return Response(
+        "Please log in with valid credentials.", 401,
+        {"WWW-Authenticate": 'Basic realm="Login Required"'}
+    )
+
+@app.before_request
+def restrict_access():
+    auth = request.authorization
+    if not auth or not (auth.username == os.getenv("DASH_USER") and auth.password == os.getenv("DASH_PASS")):
+        return authenticate()
+
 # Initialize dash app
 dash_app = Dash(
     __name__,
