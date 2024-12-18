@@ -14,6 +14,13 @@ from binance.client import Client
 from sklearn.cluster import KMeans
 from alpaca_trade_api.rest import REST  # Alpaca API
 
+# Reset trade variables
+def reset_trade():
+    global entry_price, take_profit_price, trade_direction
+    entry_price = None
+    take_profit_price = None
+    trade_direction = 0
+
 def restart_program():
     """Restart the current program."""
     try:
@@ -121,13 +128,15 @@ dash_app.layout = html.Div([
 def cluster_volatility(volatility, n_clusters=3):
     if len(volatility) < n_clusters:
         logging.warning("Not enough data points for clustering. Skipping.")
-        return None, None, None, None, None
+        return None, None, None, None, None, False  # Added False for `is_cluster_3_dominant`
 
     try:
+        # Perform KMeans clustering
         volatility = np.array(volatility).reshape(-1, 1)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
+        # Extract clustering results
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
         latest_volatility = volatility[-1][0]
@@ -136,10 +145,13 @@ def cluster_volatility(volatility, n_clusters=3):
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
         volatility_level = assigned_cluster + 1
 
-        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level
+        # Determine if Cluster 3 (index 2) is dominant
+        is_cluster_3_dominant = cluster_sizes[2] == max(cluster_sizes) if len(cluster_sizes) > 2 else False
+
+        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant
     except Exception as e:
         logging.error(f"Clustering failed: {e}")
-        return None, None, None, None, None
+        return None, None, None, None, None, False
 
 # Calculate ATR
 def calculate_atr(high, low, close):
@@ -220,7 +232,7 @@ def heartbeat_logging():
 
     try:
         # Perform clustering
-        centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
+        centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant = cluster_volatility(volatility)
         if assigned_centroid is None:
             logging.info("Heartbeat: Clustering not available.")
             return
@@ -262,13 +274,19 @@ def calculate_and_execute(price):
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
+        
 
     # Perform clustering and calculate bands
-    centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
+    centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
         return
 
+    # Check if Cluster 3 is dominant before proceeding
+    if not is_cluster_3_dominant:
+        logging.warning("Cluster 3 is not dominant. Skipping potential trade.")
+        return
+        
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
     direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
@@ -284,6 +302,8 @@ def calculate_and_execute(price):
     if len(lower_band_300_history) > 4:
         lower_band_300_history.pop(0)
 
+    
+
     # Check buy/sell conditions based on the 300-second bands
     buy_signal = any(price < band for band in lower_band_300_history)
     sell_signal = any(price > band for band in upper_band_300_history)
@@ -295,6 +315,14 @@ def calculate_and_execute(price):
         direction = -1
     else:
         direction = 0
+
+    # Use the first Supertrend (direction) for overall trend confirmation
+    is_bullish = direction == 1  # Green cloud indicates a bullish trend
+    is_bearish = direction == -1  # Red cloud indicates a bearish trend
+
+    # Detect pullback signals
+    pullback_buy = last_label == "red" and current_label == "green" and is_bullish
+    pullback_sell = last_label == "green" and current_label == "red" and is_bearish
 
     # Logging
     logging.info(
@@ -310,12 +338,25 @@ def calculate_and_execute(price):
         f"========================="
     )
 
-    # Execute trade if direction changes
-    if last_direction != direction:
-        if direction == 1:
-            execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
-        elif direction == -1:
+    # Combine all conditions for a buy signal
+    if pullback_buy and is_cluster_3_dominant:
+        logging.info(f"Buy signal confirmed at {price:.2f}. Taking long position.")
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
+        entry_price = price  # Store entry price for take-profit calculation
+        take_profit_price = entry_price * 1.015  # Set take profit at 1.5% above entry
+        logging.info(f"Take-profit level set at {take_profit_price:.2f} for entry price {entry_price:.2f}.")
+
+    # Check for take profit
+    if entry_price is not None and take_profit_price is not None:
+        if last_price >= take_profit_price:  # Take profit for buy
+            logging.info(f"Take profit reached at {last_price:.2f}. Closing long position.")
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
+            entry_price = None  # Reset entry price
+            take_profit_price = None  # Reset take profit level
+            last_direction = 0  # Reset direction to neutral
+            reset_trade()
+
+    
 
     # Update last direction
     last_direction = direction
@@ -354,23 +395,46 @@ def refresh_dashboard(n):
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price, high, low, close
+    global last_price, high, low, close, last_label, current_label
 
     if 'k' not in msg:
         return
 
     candle = msg['k']
-    last_price = float(candle['c'])
+    last_price = float(candle['c'])  # Current closing price
     high.append(float(candle['h']))
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
+    # Ensure there are enough values to calculate the labels
+    if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
+        # Assign previous label to last_label
+        if 'current_label' in globals():
+            last_label = current_label
+        else:
+            last_label = None  # Initialize last_label if not set
+
+        # Determine the current label based on price relative to the bands
+        if last_price < lower_band_300_history[-1]:
+            current_label = "green"  # Indicates potential buy signal
+        elif last_price > upper_band_300_history[-1]:
+            current_label = "red"  # Indicates potential sell signal
+        else:
+            current_label = None  # No signal
+
+    # Log the labels for debugging
+    logging.info(
+        f"Last Price: {last_price}, Last Label: {last_label}, Current Label: {current_label}"
+    )
+
+    # Manage high, low, and close lists to avoid excessive memory usage
     if len(high) > ATR_LEN + 1:
         high.pop(0)
     if len(low) > ATR_LEN + 1:
         low.pop(0)
     if len(close) > ATR_LEN + 1:
         close.pop(0)
+
 
 # WebSocket Manager
 def start_websocket():
