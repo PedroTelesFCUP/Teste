@@ -418,12 +418,12 @@ def on_message(msg):
 
     # Calculate direction for the first cycle if it hasn't been set
     if not initial_direction_calculated and last_direction is None and len(close) > 1:
-        if close[-1] > close[-2]:
+        if close[-1] > close[-10]:
             last_direction = 1  # Bullish
-        elif close[-1] < close[-2]:
+        elif close[-1] < close[-10]:
             last_direction = -1  # Bearish
         else:
-            last_direction = None  # Neutral, although unlikely with two different prices
+            last_direction = 0  # Neutral
         logging.info(f"Initial direction calculated: {last_direction}")
         initial_direction_calculated = True
 
@@ -443,8 +443,9 @@ def on_message(msg):
         # Fallback when there are no bands yet
         current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
 
+    # Log the labels for monitoring
+    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
 
-    
 
 
 # WebSocket Manager
