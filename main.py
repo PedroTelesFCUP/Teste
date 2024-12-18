@@ -405,23 +405,26 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
-    if len(upper_band_300_history) == 0 or len(lower_band_300_history) == 0:
-        logging.warning("Insufficient data to calculate labels. Skipping label update.")
-        return
-
-    # Ensure there are enough values to calculate the labels
+   # Ensure there are enough values to calculate the labels
     if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
         # Assign previous label to last_label
-        if current_label is not None:
+        if 'current_label' in globals() and current_label is not None:
             last_label = current_label
+        else:
+            last_label = None  # Default for the first iterations
 
-        # Determine the current label based on price relative to the bands
+    # Determine the current label based on price relative to the bands
         if last_price < lower_band_300_history[-1]:
             current_label = "green"  # Indicates potential buy signal
         elif last_price > upper_band_300_history[-1]:
             current_label = "red"  # Indicates potential sell signal
         else:
             current_label = None  # No signal
+    else:
+        logging.info("Not enough band history for labels. Skipping label update this time.")
+        current_label = None
+        last_label = None
+
 
     # Log the labels for debugging
     logging.info(
