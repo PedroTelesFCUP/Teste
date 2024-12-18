@@ -62,6 +62,7 @@ logging.basicConfig(
 logging.info("Trading bot initialized.")
 
 # Global Variables
+initial_direction_calculated = False  # New flag to suppress repeated messages
 volatility = []
 last_price = None
 last_direction = 0
@@ -78,7 +79,7 @@ last_label = None  # Initialize last_label to None
 current_label = None  # Initialize current_label to None
 entry_price = None
 take_profit_price = None
-initial_direction_calculated = False  # New flag to suppress repeated messages
+
 
 # Flask Server
 app = Flask(__name__)
@@ -426,7 +427,8 @@ def on_message(msg):
             last_direction = 0  # Neutral
         logging.info(f"Initial direction calculated: {last_direction}")
         initial_direction_calculated = True
-
+        logging.debug(f"Initial direction set to {initial_direction_calculated} at {datetime.datetime.now()}")
+        
     # Update last_label to the previous value of current_label
     last_label = current_label
 
