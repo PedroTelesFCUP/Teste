@@ -314,18 +314,12 @@ def start_websocket():
             logging.info(f"Reconnecting in 30 seconds...")
             time.sleep(30)  # Wait before reconnecting
 
-# Signal Processing Loop with Heartbeat Logging
 def process_signals():
-    global last_signal_time, last_log_time
+    global last_signal_time, last_heartbeat_time
     while True:
         current_time = time.time()
 
-        # Heartbeat logging every LOG_INTERVAL seconds
-        if current_time - last_log_time >= LOG_INTERVAL:
-            heartbeat_logging()
-            last_log_time = current_time
-
-        # Signal processing every SIGNAL_INTERVAL seconds
+        # Check for signal processing (every 300 seconds)
         if current_time - last_signal_time >= SIGNAL_INTERVAL:
             if last_price is not None:
                 try:
@@ -333,9 +327,14 @@ def process_signals():
                 except Exception as e:
                     logging.error(f"Error during signal processing: {e}", exc_info=True)
             last_signal_time = current_time
+            last_heartbeat_time = current_time  # Skip heartbeat logging at this time
 
-        time.sleep(1)  # Avoid excessive CPU usage
+        # Check for heartbeat logging (every 30 seconds)
+        elif current_time - last_heartbeat_time >= 30:
+            heartbeat_logging()  # Just logs the state
+            last_heartbeat_time = current_time
 
+        time.sleep(1)  # Sleep for 1 second to avoid excessive CPU usage
 
 
 # Main Script Entry Point
