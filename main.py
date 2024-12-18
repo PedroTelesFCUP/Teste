@@ -37,11 +37,11 @@ binance_client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 
 # Parameters
 ATR_LEN = 10
-ATR_FACTOR = 3.0
+ATR_FACTOR = 2.5
 ALPACA_SYMBOL = "BTC/USD"
 BINANCE_SYMBOL = "BTCUSDT"
 QUANTITY = round(0.001, 8)
-SIGNAL_INTERVAL = 300  # Seconds
+SIGNAL_INTERVAL = 30  # Seconds
 
 # Logging Configuration
 logging.basicConfig(
@@ -65,6 +65,8 @@ upper_band_history = []
 lower_band_history = []
 upper_band_300_history = []  # Stores only the 300-second upper bands
 lower_band_300_history = []  # Stores only the 300-second lower bands
+entry_price = None
+trade_direction = None  # 1 for buy, -1 for sell
 
 # Flask Server
 app = Flask(__name__)
@@ -151,7 +153,7 @@ def calculate_atr(high, low, close):
 def initialize_historical_data():
     global high, low, close, volatility
     try:
-        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="5m", limit=100 + ATR_LEN)
+        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="30s", limit=100 + ATR_LEN)
         data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume",
                                              "close_time", "quote_asset_volume", "number_of_trades",
                                              "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
@@ -381,7 +383,7 @@ def start_websocket():
             twm.start()
 
             # Start streaming 5-minute candles
-            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="5m")
+            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="30s")
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
