@@ -78,7 +78,6 @@ last_label = None  # Initialize last_label to None
 current_label = None  # Initialize current_label to None
 entry_price = None
 take_profit_price = None
-first_cycle = True
 
 # Flask Server
 app = Flask(__name__)
@@ -281,19 +280,11 @@ def heartbeat_logging():
 
 # Signal Processing
 def calculate_and_execute(price):
-    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history, entry_price, take_profit_price, first_cycle
+    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history, entry_price, take_profit_price
 
-
-    # Skip processing entirely for the first cycle
-    if first_cycle:
-        logging.info("First cycle detected. Skipping signal processing until sufficient data is available.")
-        first_cycle = False
-        return
-        
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
-    
 
     # Perform clustering and calculate bands
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant = cluster_volatility(volatility)
@@ -405,7 +396,7 @@ def refresh_dashboard(n):
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price, high, low, close, last_label, current_label, first_cycle
+    global last_price, high, low, close, last_label, current_label
 
     if 'k' not in msg:
         return
@@ -416,33 +407,34 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
-    # Check if we have enough data for bands
-    if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
-        # Update last_label
-        last_label = current_label
+    # Ensure there are enough values to calculate the labels
 
-        # Assign labels based on price relative to bands
-        if last_price < lower_band_300_history[-1]:
-            current_label = "green"  # Potential buy signal
-        elif last_price > upper_band_300_history[-1]:
-            current_label = "red"  # Potential sell signal
-        else:
-            # Use trend direction as fallback
-            if last_direction == 1:
-                current_label = "green"
-            elif last_direction == -1:
-                current_label = "red"
-            else:
-                current_label = None  # No trend identified yet
+    # Update last_label
+    last_label = current_label
+
+    # Determine the current label based on price relative to the bands
+    if last_price < lower_band_300_history[-1]:
+        current_label = "green"  # Indicates potential buy signal
+    elif last_price > upper_band_300_history[-1]:
+        current_label = "red"  # Indicates potential sell signal
     else:
-        # First cycle fallback
-        if first_cycle:
-            current_label = None
-            last_label = None
+        # Assign based on trend as fallback
+        if last_direction == 1:
+            current_label = "green"  # Bullish trend fallback
+        elif last_direction == -1:
+            current_label = "red"  # Bearish trend fallback
         else:
-            # Assign based on trend direction if bands are unavailable
-            current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
-            last_label = current_label
+            current_label = None  # No trend direction
+    else:
+        # Not enough band history, fallback to trend direction
+        if last_direction == 1:
+            current_label = "green"
+        elif last_direction == -1:
+            current_label = "red"
+        else:
+            current_label = None
+
+        last_label = current_label  # Update last_label to maintain state
 
     # Manage high, low, and close lists to avoid excessive memory usage
     if len(high) > ATR_LEN + 1:
@@ -451,7 +443,6 @@ def on_message(msg):
         low.pop(0)
     if len(close) > ATR_LEN + 1:
         close.pop(0)
-
 
 
 # WebSocket Manager
