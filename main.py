@@ -57,7 +57,8 @@ logging.basicConfig(
 logging.info("Trading bot initialized.")
 
 # Global Variables
-volatility = []
+primary_volatility = []
+secondary_volatility = []
 last_price = None
 last_direction = 1 # default as Bullish
 last_signal_time = 0
@@ -447,21 +448,21 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     """
     global entry_price  # Ensure this global variable is properly used
 
-    if not volatility or len(volatility) < 3:
-        logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
+    # Perform clustering separately for primary and secondary signals
+    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
+    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+
+    # Skip cycle if clustering fails
+    if primary_assigned_centroid is None or secondary_assigned_centroid is None:
+        logging.warning("Clustering failed for one or both signals. Skipping cycle.")
         return primary_direction, secondary_direction
 
-    centroids, _, assigned_centroid, _, dominant_cluster = cluster_volatility(volatility)
-    if assigned_centroid is None:
-        logging.warning("Clustering failed. Skipping cycle.")
-        return primary_direction, secondary_direction
-
-    # Calculate ATR and SuperTrend
+    # Calculate ATR and SuperTrend for primary and secondary signals
     new_primary_direction, _, _ = calculate_supertrend_with_clusters(
-        high, low, close, assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
+        high, low, close, primary_assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
     )
     new_secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
-        high, low, close, assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
+        high, low, close, secondary_assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
     )
 
     # Update directions
@@ -471,12 +472,10 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     # Handle Stop-Loss and Take-Profit Logic
     stop_loss = None
     take_profit = None
-
-    if secondary_lower_band is not None and secondary_upper_band is not None:
+    if entry_price is not None:
         stop_loss = secondary_lower_band.iloc[-1]
         take_profit = stop_loss * 1.5
 
-    if entry_price is not None:
         if price <= stop_loss:
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
             logging.info(f"Stop-loss triggered. Exiting trade. Price: {price:.2f}")
@@ -487,12 +486,13 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
             logging.info(f"Take-profit triggered. Exiting trade. Price: {price:.2f}")
             entry_price = None  # Reset entry price
 
-
     # Execute Buy Signal if conditions are met
     buy_signal = (
-        dominant_cluster == 3 and  # High volatility cluster is dominant
+        primary_dominant_cluster == 3 and  # Primary clustering shows high volatility
         primary_direction == 1 and  # Primary signal is bullish
-        secondary_direction == 1 and entry_price is None  # Secondary is also bullish and no active trade
+        secondary_direction == 1 and  # Secondary signal is bullish
+        secondary_dominant_cluster == 3 and  # Secondary clustering shows high volatility
+        entry_price is None  # No active trade
     )
     if buy_signal:
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
@@ -505,8 +505,10 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     logging.info(
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
-        f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
-        f"Dominant Cluster: {dominant_cluster}\n"
+        f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
+        f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
+        f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
+        f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
         f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
         f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
         f"Entry Price: {entry_price if entry_price else 'None'}\n"
@@ -516,6 +518,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     )
 
     return primary_direction, secondary_direction
+
 
 
 # Update dash
@@ -629,10 +632,18 @@ def process_signals():
 if __name__ == "__main__":
     # Initialize historical data
     initialize_historical_data()
-    
-    # Initialize primary and secondary directions
-    primary_direction = initialize_direction(high, low, close, assigned_centroid)
-    secondary_direction = initialize_direction(high, low, close, assigned_centroid)
+    # Perform clustering for both signals
+    primary_centroids, _, primary_assigned_centroid, _, _ = cluster_volatility(primary_volatility)
+    secondary_centroids, _, secondary_assigned_centroid, _, _ = cluster_volatility(secondary_volatility)
+
+    # Validate clustering results before proceeding
+    if primary_assigned_centroid is None or secondary_assigned_centroid is None:
+        raise ValueError("Clustering failed for one or both signals. Check volatility data.")
+
+    # Initialize directions
+    primary_direction = initialize_direction(high, low, close, PRIMARY_ATR_FACTOR, primary_assigned_centroid)
+    secondary_direction = initialize_direction(high, low, close, SECONDARY_ATR_FACTOR, secondary_assigned_centroid)
+
     logging.info(f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}")
     logging.info(f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}")
 
