@@ -193,6 +193,34 @@ def initialize_historical_data():
         logging.error(f"Error initializing historical data: {e}")
         high, low, close, volatility = [], [], [], []
 
+def initialize_direction(high, low, close):
+    """
+    Determine the initial direction based on historical data.
+
+    :param high: List of high prices.
+    :param low: List of low prices.
+    :param close: List of close prices.
+    :return: Initial direction: 1 for bullish, -1 for bearish.
+    """
+    try:
+        if len(close) < 50:  # Ensure sufficient data for moving averages
+            logging.warning("Not enough data to determine initial direction. Defaulting to bullish.")
+            return 1  # Default to bullish
+
+        # Calculate short-term and long-term moving averages
+        short_ma = pd.Series(close).rolling(window=10).mean().iloc[-1]
+        long_ma = pd.Series(close).rolling(window=50).mean().iloc[-1]
+
+        # Determine initial direction based on moving average crossover
+        if short_ma > long_ma:
+            return 1  # Bullish
+        else:
+            return -1  # Bearish
+
+    except Exception as e:
+        logging.error(f"Error during direction initialization: {e}")
+        return 1  # Default to bullish if an error occurs
+
 # Calculate SuperTrend
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
     hl2 = (high + low) / 2
@@ -208,8 +236,6 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
         direction = -1
     elif close.iloc[-1] < lower_band.iloc[-1]:
         direction = 1
-    else:
-        direction = 0
 
     return direction, upper_band, lower_band
 
@@ -314,8 +340,6 @@ def calculate_and_execute(price):
         direction = 1
     elif sell_signal:
         direction = -1
-    else:
-        direction = 0
 
     # Logging
     logging.info(
@@ -449,6 +473,13 @@ def process_signals():
 if __name__ == "__main__":
     initialize_historical_data()  # Initialize historical data
 
+    try:
+        last_direction = initialize_direction(high, low, close)
+        logging.info(f"Initial direction set to: {'Bullish (1)' if last_direction == 1 else 'Bearish (-1)'}")
+    except Exception as e:
+        logging.error(f"Failed to initialize direction: {e}")
+        last_direction = 1  # Default fallback to bullish
+        
     # Start Flask app in a separate thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     time.sleep(10)
