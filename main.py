@@ -134,11 +134,6 @@ def cluster_volatility(volatility, n_clusters=3):
     try:
         # Input validation
         if len(volatility) < n_clusters:
-            logging.warning(f"Not enough data points for clustering. Need at least {n_clusters}, got {len(volatility)}.")
-            return None, None, None, None, None
-
-        if not isinstance(volatility, (list, np.ndarray)):
-            logging.error("Volatility data must be a list or numpy array.")
             return None, None, None, None, None
 
         # Prepare data for clustering
@@ -160,33 +155,22 @@ def cluster_volatility(volatility, n_clusters=3):
 
         # Find the dominant cluster
         dominant_cluster = np.argmax(cluster_sizes)  # Cluster with the largest size
-        dominance = dominant_cluster + 1  # Convert to 1-based index for human readability
 
-        # Logging details
-        logging.info(
-            f"Clustering completed: "
-            f"Centroids = {', '.join(f'{x:.2f}' for x in centroids)}, "
-            f"Cluster Sizes = {', '.join(map(str, cluster_sizes))}, "
-            f"Assigned Cluster = {assigned_cluster + 1}, "
-            f"Dominant Cluster = {dominance}"
-        )
+        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
 
-        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominance
-
-    except Exception as e:
-        logging.error(f"Clustering failed: {e}", exc_info=True)
+    except Exception:
         return None, None, None, None, None
 
 
-
 # Calculate ATR
-def calculate_atr(high, low, close):
+def calculate_atr(high, low, close, factor=1):
     """
-    Calculate the Average True Range (ATR).
-    
+    Calculate the Average True Range (ATR) with an optional multiplication factor.
+
     :param high: Series of high prices.
     :param low: Series of low prices.
     :param close: Series of close prices.
+    :param factor: Multiplication factor for ATR (default is 1).
     :return: Latest ATR value or None if calculation fails.
     """
     try:
@@ -201,19 +185,15 @@ def calculate_atr(high, low, close):
         tr3 = abs(low - close.shift(1))
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
-        # Calculate ATR
-        atr = tr.rolling(window=ATR_LEN).mean()
+        # Calculate ATR with the specified factor
+        atr = tr.rolling(window=ATR_LEN).mean() * factor
 
-        # Return the latest ATR value
-        if len(atr.dropna()) > 0:
-            return atr.iloc[-1]
-        else:
-            logging.warning("ATR calculation resulted in NaN values.")
-            return None
+        # Return the latest ATR value if available
+        return atr.iloc[-1] if len(atr.dropna()) > 0 else None
+
     except Exception as e:
         logging.error(f"Error calculating ATR: {e}", exc_info=True)
         return None
-
 
 # Initialize Volatility and Historical Data
 def initialize_historical_data():
@@ -236,30 +216,39 @@ def initialize_historical_data():
         low = data["low"].astype(float).tolist()
         close = data["close"].astype(float).tolist()
 
-        # Calculate True Range (TR) components
-        tr1 = data["high"].astype(float) - data["low"].astype(float)
-        tr2 = abs(data["high"].astype(float) - data["close"].shift(1).astype(float))
-        tr3 = abs(data["low"].astype(float) - data["close"].shift(1).astype(float))
-        
-        # Calculate the Average True Range (ATR)
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = tr.rolling(window=ATR_LEN).mean()
+        # Validate that we have enough data for ATR calculations
+        if len(high) < ATR_LEN or len(low) < ATR_LEN or len(close) < ATR_LEN:
+            logging.warning("Insufficient data for ATR calculation. Resetting values.")
+            high, low, close, primary_volatility, secondary_volatility = [], [], [], [], []
+            return
 
-        # Update primary and secondary volatilities
-        primary_volatility = atr[-100:].dropna().tolist()
-        secondary_volatility = atr[-100:].dropna().tolist()
+        # Calculate ATR for primary and secondary volatilities
+        primary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=8)
+        secondary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=3)
+
+        if primary_atr is not None:
+            primary_volatility = [primary_atr] * 100  # Initialize with consistent data
+        else:
+            primary_volatility = []
+
+        if secondary_atr is not None:
+            secondary_volatility = [secondary_atr] * 100  # Initialize with consistent data
+        else:
+            secondary_volatility = []
 
         # Update volatility (generic list for legacy compatibility)
-        volatility = primary_volatility  # Optional: Keep for backward compatibility if needed
+        volatility = primary_volatility
 
+        # Log initialization success or warning
         if not primary_volatility or not secondary_volatility:
             logging.warning("ATR calculation resulted in insufficient data for volatility.")
-        
-        logging.info(f"Initialized historical data for {BINANCE_SYMBOL} with {len(close)} close entries "
-                     f"and {len(primary_volatility)} valid ATR values for both signals.")
+        else:
+            logging.info(f"Initialized historical data for {BINANCE_SYMBOL} with {len(close)} close entries "
+                         f"and valid ATR values for both signals.")
     except Exception as e:
         logging.error(f"Error initializing historical data for {BINANCE_SYMBOL}: {e}")
-        high, low, close, volatility, primary_volatility, secondary_volatility = [], [], [], [], [], []  # Reset to empty lists on failure
+        # Reset to empty lists on failure
+        high, low, close, volatility, primary_volatility, secondary_volatility = [], [], [], [], [], []
 
 
 def initialize_direction(high, low, close, atr_factor, assigned_centroid):
@@ -274,20 +263,38 @@ def initialize_direction(high, low, close, atr_factor, assigned_centroid):
     :return: Initial direction (1 for bullish, -1 for bearish).
     """
     try:
+        # Convert inputs to Pandas Series for vectorized operations
         high = pd.Series(high)
         low = pd.Series(low)
         close = pd.Series(close)
 
-        # Calculate HL2 and bands
+        # Ensure sufficient data for calculation
+        if len(high) < ATR_LEN or len(low) < ATR_LEN or len(close) < ATR_LEN:
+            logging.warning("Insufficient data to initialize direction.")
+            return 1  # Default to bullish if data is insufficient
+
+        # Calculate HL2 (average of high and low) and bands
         hl2 = (high + low) / 2
         upper_band = hl2 + atr_factor * assigned_centroid
         lower_band = hl2 - atr_factor * assigned_centroid
 
-        # Check historical trend to set direction
+        # Check the latest close price against the bands to determine direction
         if close.iloc[-1] < lower_band.iloc[-1]:
-            return 1  # Bullish
+            direction = 1  # Bullish
         elif close.iloc[-1] > upper_band.iloc[-1]:
-            return -1  # Bearish
+            direction = -1  # Bearish
+        else:
+            # Persist direction by comparing the last few close prices
+            # Default to bullish if no clear trend is established
+            direction = 1 if close.iloc[-1] < hl2.iloc[-1] else -1
+
+        # Log the initialization details
+        logging.info(
+            f"Initialized direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+            f"Last Close: {close.iloc[-1]:.2f}, Upper Band: {upper_band.iloc[-1]:.2f}, Lower Band: {lower_band.iloc[-1]:.2f}"
+        )
+
+        return direction
 
     except Exception as e:
         logging.error(f"Error in initialize_direction: {e}", exc_info=True)
@@ -461,6 +468,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
 
+
     # Calculate ATR and SuperTrend for primary and secondary signals
     new_primary_direction, _, _ = calculate_supertrend_with_clusters(
         high, low, close, primary_assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
@@ -566,22 +574,21 @@ def on_message(msg):
     if len(close) > ATR_LEN + 1:
         close.pop(0)
 
-    # Calculate ATR and update primary and secondary volatilities
+    # Update ATR for both signals
     if len(high) >= ATR_LEN:
-        try:
-            atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-            if atr is not None:
-                # Update primary and secondary volatilities
-                primary_volatility.append(atr)
-                secondary_volatility.append(atr)
+        primary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=8)
+        secondary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=3)
 
-                # Maintain rolling window of 100 entries
-                if len(primary_volatility) > 100:
-                    primary_volatility.pop(0)
-                if len(secondary_volatility) > 100:
-                    secondary_volatility.pop(0)
-        except Exception as e:
-            logging.error(f"Error updating ATR for volatilities: {e}")
+        if primary_atr:
+            primary_volatility.append(primary_atr)
+            if len(primary_volatility) > 100:
+                primary_volatility.pop(0)
+
+        if secondary_atr:
+            secondary_volatility.append(secondary_atr)
+            if len(secondary_volatility) > 100:
+                secondary_volatility.pop(0)
+
 
 # WebSocket Manager
 def start_websocket():
@@ -619,6 +626,11 @@ def process_signals():
             # Signal processing every SIGNAL_INTERVAL seconds
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
+                    # Perform clustering separately for primary and secondary volatilities
+                    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
+                    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+
+                    # Execute trading logic
                     primary_direction, secondary_direction = calculate_and_execute(
                         last_price, primary_direction, secondary_direction
                     )
@@ -635,14 +647,14 @@ def process_signals():
         # Sleep for a small interval to avoid excessive CPU usage
         time.sleep(1)
 
-
 # Main Script Entry Point
 if __name__ == "__main__":
     # Initialize historical data
     initialize_historical_data()
     # Perform clustering for both signals
-    primary_centroids, _, primary_assigned_centroid, _, _ = cluster_volatility(primary_volatility)
-    secondary_centroids, _, secondary_assigned_centroid, _, _ = cluster_volatility(secondary_volatility)
+    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
+    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+
 
     # Validate clustering results before proceeding
     if primary_assigned_centroid is None or secondary_assigned_centroid is None:
@@ -651,6 +663,7 @@ if __name__ == "__main__":
     # Initialize directions
     primary_direction = initialize_direction(high, low, close, PRIMARY_ATR_FACTOR, primary_assigned_centroid)
     secondary_direction = initialize_direction(high, low, close, SECONDARY_ATR_FACTOR, secondary_assigned_centroid)
+
 
     logging.info(f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}")
     logging.info(f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}")
