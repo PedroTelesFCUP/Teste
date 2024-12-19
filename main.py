@@ -454,7 +454,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     :param secondary_direction: Current direction of the secondary signal.
     :return: Updated primary_direction and secondary_direction.
     """
-    global entry_price  # Ensure this global variable is properly used
+    global entry_price, primary_direction, secondary_direction # Ensure this global variable is properly used
 
     # Perform clustering separately for primary and secondary signals
     primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
