@@ -335,64 +335,63 @@ def calculate_and_execute(price):
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
         return
 
-    # Perform clustering and calculate bands
-    centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominance = cluster_volatility(volatility)
+    # Perform clustering
+    centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
         return
 
+    # Calculate ATR and SuperTrend
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
     direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
     )
 
     # Update the 300-second band history
-    try:
-        upper_band_300_history.append(float(upper_band.iloc[-1]))
-        lower_band_300_history.append(float(lower_band.iloc[-1]))
-    except Exception as e:
-        logging.error(f"Error updating band history: {e}")
-        return
+    upper_band_300_history.append(float(upper_band.iloc[-1]))
+    lower_band_300_history.append(float(lower_band.iloc[-1]))
 
-    # Keep only the last 4 values for band history
+    # Keep only the last 4 values
     if len(upper_band_300_history) > 4:
         upper_band_300_history.pop(0)
     if len(lower_band_300_history) > 4:
         lower_band_300_history.pop(0)
 
-    # Check buy/sell conditions based on the 300-second bands and dominance
-    if dominance == 3:  # Only act if high volatility is dominant
-        buy_signal = any(price < band for band in lower_band_300_history)
-        sell_signal = any(price > band for band in upper_band_300_history)
+    # Check buy/sell conditions based on the 300-second bands
+    buy_signal = any(price < band for band in lower_band_300_history)
+    sell_signal = any(price > band for band in upper_band_300_history)
 
-        # Determine the direction based on signals
-        if buy_signal and last_direction != 1:
-            logging.info("Buy signal detected under high volatility. Executing trade.")
-            execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
-            last_direction = 1  # Update direction to bullish
-
-        elif sell_signal and last_direction != -1:
-            logging.info("Sell signal detected under high volatility. Executing trade.")
-            execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-            last_direction = -1  # Update direction to bearish
-
+    # Determine the direction based on signals
+    if buy_signal:
+        direction = 1
+    elif sell_signal:
+        direction = -1
     else:
-        logging.info("Dominant cluster is not high volatility. No action taken.")
+        direction = last_direction  # Maintain current direction
 
-    # Logging the current state
+    # Logging
     logging.info(
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
-        f"Volatility Level: {assigned_cluster + 1}\n"
-        f"Dominant Cluster: {dominance}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-        f"Direction: {'Bullish (1)' if last_direction == 1 else 'Bearish (-1)'}\n"
+        f"Dominant Cluster: {dominant_cluster}\n"
+        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
         f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
         f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
         f"========================="
     )
+
+    # Execute trade if direction changes
+    if last_direction != direction:
+        if direction == 1:
+            execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
+        elif direction == -1:
+            execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
+
+    # Update last direction
+    last_direction = direction
 
 
 
@@ -429,7 +428,7 @@ def refresh_dashboard(n):
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price, high, low, close
+    global last_price, high, low, close, volatility
 
     if 'k' not in msg:
         return
@@ -440,12 +439,24 @@ def on_message(msg):
     low.append(float(candle['l']))
     close.append(float(candle['c']))
 
+    # Limit the length of historical data
     if len(high) > ATR_LEN + 1:
         high.pop(0)
     if len(low) > ATR_LEN + 1:
         low.pop(0)
     if len(close) > ATR_LEN + 1:
         close.pop(0)
+
+    # Calculate ATR and update volatility
+    if len(high) >= ATR_LEN:
+        try:
+            atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
+            volatility.append(atr)
+            if len(volatility) > 100:  # Maintain a rolling window of 100
+                volatility.pop(0)
+        except Exception as e:
+            logging.error(f"Error updating ATR: {e}")
+
 
 # WebSocket Manager
 def start_websocket():
