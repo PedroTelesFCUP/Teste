@@ -417,18 +417,36 @@ def on_message(msg):
     if len(close) > ATR_LEN + 1:
         close.pop(0)
 
-    # Calculate direction for the first cycle if it hasn't been set
-    if not initial_direction_calculated and last_direction is None and len(close) > 10:
-        if close[-1] > close[-10]:
+    ## Calculate direction for the first cycle
+if not initial_direction_calculated and last_direction is None:
+    if len(close) > 1:  # Ensure at least 2 values are available
+        if close[-1] > close[-2]:
             last_direction = 1  # Bullish
-        elif close[-1] < close[-10]:
+            current_label = "green"
+        elif close[-1] < close[-2]:
             last_direction = -1  # Bearish
-        else:
-            last_direction = 0  # Neutral
-        logging.info(f"Initial direction calculated: {last_direction}")
-        initial_direction_calculated = True
-        logging.debug(f"Initial direction set to {initial_direction_calculated} at {datetime.datetime.now()}")
+            current_label = "red"
         
+        # Update last_label during the first cycle
+        last_label = current_label
+        logging.info(f"Initial direction calculated: {'Bullish' if last_direction == 1 else 'Bearish'}")
+        initial_direction_calculated = True
+    else:
+        logging.warning("Insufficient data to calculate initial direction.")
+
+# Dynamically update direction with more data
+if len(close) > 10:
+    if close[-1] > close[-10]:
+        last_direction = 1  # Bullish
+        last_label = current_label  # Preserve the old label
+        current_label = "green"  # Update to the new label
+    elif close[-1] < close[-10]:
+        last_direction = -1  # Bearish
+        last_label = current_label  # Preserve the old label
+        current_label = "red"  # Update to the new label
+    logging.info(f"Updated direction dynamically: {'Bullish' if last_direction == 1 else 'Bearish'}")
+
+
     # Update last_label to the previous value of current_label
     last_label = current_label
 
@@ -447,7 +465,6 @@ def on_message(msg):
 
     # Log the labels for monitoring
     logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
-
 
 
 # WebSocket Manager
