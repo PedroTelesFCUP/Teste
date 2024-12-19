@@ -220,7 +220,7 @@ def initialize_historical_data():
     """
     Initializes historical market data for high, low, close prices, and volatility.
     """
-    global high, low, close, volatility
+    global high, low, close, volatility, primary_volatility, secondary_volatility
     try:
         # Fetch historical data from Binance
         logging.info(f"Fetching historical data for {BINANCE_SYMBOL} with interval 1m.")
@@ -245,16 +245,22 @@ def initialize_historical_data():
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = tr.rolling(window=ATR_LEN).mean()
 
-        # Update volatility
-        volatility = atr[-100:].dropna().tolist()
-        if not volatility:
+        # Update primary and secondary volatilities
+        primary_volatility = atr[-100:].dropna().tolist()
+        secondary_volatility = atr[-100:].dropna().tolist()
+
+        # Update volatility (generic list for legacy compatibility)
+        volatility = primary_volatility  # Optional: Keep for backward compatibility if needed
+
+        if not primary_volatility or not secondary_volatility:
             logging.warning("ATR calculation resulted in insufficient data for volatility.")
         
         logging.info(f"Initialized historical data for {BINANCE_SYMBOL} with {len(close)} close entries "
-                     f"and {len(volatility)} valid ATR values.")
+                     f"and {len(primary_volatility)} valid ATR values for both signals.")
     except Exception as e:
         logging.error(f"Error initializing historical data for {BINANCE_SYMBOL}: {e}")
-        high, low, close, volatility = [], [], [], []  # Reset to empty lists on failure
+        high, low, close, volatility, primary_volatility, secondary_volatility = [], [], [], [], [], []  # Reset to empty lists on failure
+
 
 def initialize_direction(high, low, close, atr_factor, assigned_centroid):
     """
@@ -547,7 +553,7 @@ def update_dashboard():
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price, high, low, close, volatility
+    global last_price, high, low, close, primary_volatility, secondary_volatility
 
     if 'k' not in msg:
         return
@@ -566,16 +572,22 @@ def on_message(msg):
     if len(close) > ATR_LEN + 1:
         close.pop(0)
 
-    # Calculate ATR and update volatility
+    # Calculate ATR and update primary and secondary volatilities
     if len(high) >= ATR_LEN:
         try:
             atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-            volatility.append(atr)
-            if len(volatility) > 100:  # Maintain a rolling window of 100
-                volatility.pop(0)
-        except Exception as e:
-            logging.error(f"Error updating ATR: {e}")
+            if atr is not None:
+                # Update primary and secondary volatilities
+                primary_volatility.append(atr)
+                secondary_volatility.append(atr)
 
+                # Maintain rolling window of 100 entries
+                if len(primary_volatility) > 100:
+                    primary_volatility.pop(0)
+                if len(secondary_volatility) > 100:
+                    secondary_volatility.pop(0)
+        except Exception as e:
+            logging.error(f"Error updating ATR for volatilities: {e}")
 
 # WebSocket Manager
 def start_websocket():
