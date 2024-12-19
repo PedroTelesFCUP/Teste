@@ -608,7 +608,7 @@ def start_websocket():
             time.sleep(30)  # Wait before reconnecting
 
 def process_signals():
-    global last_signal_time, last_heartbeat_time
+    global last_signal_time, last_heartbeat_time, primary_direction, secondary_direction
 
     # Align to the next 30-second mark minus a few seconds (e.g., 3 seconds before)
     now = datetime.datetime.now()
@@ -625,7 +625,9 @@ def process_signals():
             # Signal processing every SIGNAL_INTERVAL seconds
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
-                    calculate_and_execute(last_price)
+                    primary_direction, secondary_direction = calculate_and_execute(
+                        last_price, primary_direction, secondary_direction
+                    )
                 last_signal_time = current_time  # Update the last signal time
 
             # Heartbeat logging every 30 seconds
