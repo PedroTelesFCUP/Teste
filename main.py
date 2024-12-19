@@ -125,37 +125,26 @@ def cluster_volatility(volatility, n_clusters=3):
         return None, None, None, None, None
 
     try:
-        # Reshape volatility array for K-Means
         volatility = np.array(volatility).reshape(-1, 1)
-        
-        # Perform K-Means clustering
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
-        # Extract centroids and labels
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
 
-        # Sort clusters by centroids
-        sorted_indices = np.argsort(centroids)  # Indices that sort the centroids
-        sorted_centroids = centroids[sorted_indices]
-        remapped_labels = np.zeros_like(labels)
+        # Calculate cluster sizes directly
+        cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
 
-        # Re-map labels based on sorted centroids
-        for new_label, old_label in enumerate(sorted_indices):
-            remapped_labels[labels == old_label] = new_label
-
-        # Calculate cluster sizes based on remapped labels
-        cluster_sizes = [int(np.sum(remapped_labels == i)) for i in range(n_clusters)]
-
-        # Get latest volatility cluster information
+        # Identify the cluster of the latest volatility value
         latest_volatility = volatility[-1][0]
-        assigned_cluster = remapped_labels[-1]  # Latest cluster after re-mapping
-        assigned_centroid = sorted_centroids[assigned_cluster]
-        volatility_level = assigned_cluster + 1  # Convert to 1-based index
+        assigned_cluster = kmeans.predict([[latest_volatility]])[0]
+        assigned_centroid = centroids[assigned_cluster]
 
-        # Return sorted centroids and other details
-        return sorted_centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level
+        # Find the dominant cluster
+        dominant_cluster = np.argmax(cluster_sizes)  # Cluster with the largest size
+        dominance = dominant_cluster + 1  # Convert to 1-based index for human readability
+
+        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominance
     except Exception as e:
         logging.error(f"Clustering failed: {e}")
         return None, None, None, None, None
