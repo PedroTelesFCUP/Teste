@@ -273,7 +273,8 @@ def heartbeat_logging():
             f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
             f"=========================="
         )
-
+    except Exception as e:
+        logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
 
 # Signal Processing
 def calculate_and_execute(price):
