@@ -118,28 +118,48 @@ dash_app.layout = html.Div([
 ])
 
 # Perform K-Means Clustering on volatility
+# Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
     if len(volatility) < n_clusters:
         logging.warning("Not enough data points for clustering. Skipping.")
         return None, None, None, None, None
 
     try:
+        # Reshape volatility array for K-Means
         volatility = np.array(volatility).reshape(-1, 1)
+        
+        # Perform K-Means clustering
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
+        # Extract centroids and labels
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
-        latest_volatility = volatility[-1][0]
-        assigned_cluster = kmeans.predict([[latest_volatility]])[0]
-        assigned_centroid = centroids[assigned_cluster]
-        cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
-        volatility_level = assigned_cluster + 1
 
-        return centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level
+        # Sort clusters by centroids
+        sorted_indices = np.argsort(centroids)  # Indices that sort the centroids
+        sorted_centroids = centroids[sorted_indices]
+        remapped_labels = np.zeros_like(labels)
+
+        # Re-map labels based on sorted centroids
+        for new_label, old_label in enumerate(sorted_indices):
+            remapped_labels[labels == old_label] = new_label
+
+        # Calculate cluster sizes based on remapped labels
+        cluster_sizes = [int(np.sum(remapped_labels == i)) for i in range(n_clusters)]
+
+        # Get latest volatility cluster information
+        latest_volatility = volatility[-1][0]
+        assigned_cluster = remapped_labels[-1]  # Latest cluster after re-mapping
+        assigned_centroid = sorted_centroids[assigned_cluster]
+        volatility_level = assigned_cluster + 1  # Convert to 1-based index
+
+        # Return sorted centroids and other details
+        return sorted_centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level
     except Exception as e:
         logging.error(f"Clustering failed: {e}")
         return None, None, None, None, None
+
 
 # Calculate ATR
 def calculate_atr(high, low, close):
@@ -247,13 +267,13 @@ def heartbeat_logging():
             f"Volatility Level: {volatility_level}\n"
             f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
             f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
+            f"High Volatility Cluster (Cluster 3): Centroid = {centroids[-1]:.2f}, Size = {cluster_sizes[-1]}\n"
             f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
             f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
             f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
             f"=========================="
         )
-    except Exception as e:
-        logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
+
 
 # Signal Processing
 def calculate_and_execute(price):
@@ -304,6 +324,7 @@ def calculate_and_execute(price):
         f"Volatility Level: {volatility_level}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
+        f"High Volatility Cluster (Cluster 3): Centroid = {centroids[-1]:.2f}, Size = {cluster_sizes[-1]}\n"
         f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
         f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
         f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
