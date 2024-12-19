@@ -283,10 +283,10 @@ def initialize_direction(high, low, close, atr_factor, assigned_centroid):
             direction = 1  # Bullish
         elif close.iloc[-1] > upper_band.iloc[-1]:
             direction = -1  # Bearish
-        else:
-            # Persist direction by comparing the last few close prices
-            # Default to bullish if no clear trend is established
-            direction = 1 if close.iloc[-1] < hl2.iloc[-1] else -1
+         else:
+            # Fallback: Compare to midpoint of bands for neutrality
+            midpoint = (upper_band.iloc[-1] + lower_band.iloc[-1]) / 2
+            direction = 1 if close.iloc[-1] < midpoint else -1
 
         # Log the initialization details
         logging.info(
