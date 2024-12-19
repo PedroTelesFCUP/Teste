@@ -290,7 +290,7 @@ def heartbeat_logging():
 
     try:
         # Perform clustering
-        centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
+        centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominance = cluster_volatility(volatility)
         if assigned_centroid is None:
             logging.info("Heartbeat: Clustering not available.")
             return
@@ -309,15 +309,15 @@ def heartbeat_logging():
         if len(lower_band_history) > 4:
             lower_band_history.pop(0)
 
-        # Logging detailed information
+        # Logging detailed information, including the dominant cluster
         logging.info(
             f"\n=== Heartbeat Logging ===\n"
             f"Price: {last_price:.2f}\n"
             f"ATR: {atr:.2f}\n"
-            f"Volatility Level: {volatility_level}\n"
+            f"Volatility Level: {assigned_cluster + 1}\n"
+            f"Dominant Cluster: {dominance}\n"
             f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
             f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-            f"High Volatility Cluster (Cluster 3): Centroid = {centroids[-1]:.2f}, Size = {cluster_sizes[-1]}\n"
             f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
             f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
             f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
@@ -325,6 +325,7 @@ def heartbeat_logging():
         )
     except Exception as e:
         logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
+
 
 # Signal Processing
 def calculate_and_execute(price):
@@ -335,7 +336,7 @@ def calculate_and_execute(price):
         return
 
     # Perform clustering and calculate bands
-    centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level = cluster_volatility(volatility)
+    centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominance = cluster_volatility(volatility)
     if assigned_centroid is None:
         logging.warning("Clustering failed. Skipping cycle.")
         return
@@ -346,49 +347,53 @@ def calculate_and_execute(price):
     )
 
     # Update the 300-second band history
-    upper_band_300_history.append(float(upper_band.iloc[-1]))
-    lower_band_300_history.append(float(lower_band.iloc[-1]))
+    try:
+        upper_band_300_history.append(float(upper_band.iloc[-1]))
+        lower_band_300_history.append(float(lower_band.iloc[-1]))
+    except Exception as e:
+        logging.error(f"Error updating band history: {e}")
+        return
 
-    # Keep only the last 4 values
+    # Keep only the last 4 values for band history
     if len(upper_band_300_history) > 4:
         upper_band_300_history.pop(0)
     if len(lower_band_300_history) > 4:
         lower_band_300_history.pop(0)
 
-    # Check buy/sell conditions based on the 300-second bands
-    buy_signal = any(price < band for band in lower_band_300_history)
-    sell_signal = any(price > band for band in upper_band_300_history)
+    # Check buy/sell conditions based on the 300-second bands and dominance
+    if dominance == 3:  # Only act if high volatility is dominant
+        buy_signal = any(price < band for band in lower_band_300_history)
+        sell_signal = any(price > band for band in upper_band_300_history)
 
-    # Determine the direction based on signals
-    if buy_signal:
-        direction = 1
-    elif sell_signal:
-        direction = -1
+        # Determine the direction based on signals
+        if buy_signal and last_direction != 1:
+            logging.info("Buy signal detected under high volatility. Executing trade.")
+            execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
+            last_direction = 1  # Update direction to bullish
 
-    # Logging
+        elif sell_signal and last_direction != -1:
+            logging.info("Sell signal detected under high volatility. Executing trade.")
+            execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
+            last_direction = -1  # Update direction to bearish
+
+    else:
+        logging.info("Dominant cluster is not high volatility. No action taken.")
+
+    # Logging the current state
     logging.info(
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
-        f"Volatility Level: {volatility_level}\n"
+        f"Volatility Level: {assigned_cluster + 1}\n"
+        f"Dominant Cluster: {dominance}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-        f"High Volatility Cluster (Cluster 3): Centroid = {centroids[-1]:.2f}, Size = {cluster_sizes[-1]}\n"
-        f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+        f"Direction: {'Bullish (1)' if last_direction == 1 else 'Bearish (-1)'}\n"
         f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
         f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
         f"========================="
     )
 
-    # Execute trade if direction changes
-    if last_direction != direction:
-        if direction == 1:
-            execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
-        elif direction == -1:
-            execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-
-    # Update last direction
-    last_direction = direction
 
 
 # Update dash
