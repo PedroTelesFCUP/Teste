@@ -406,7 +406,6 @@ def heartbeat_logging():
         )
 
         # Update global directions
-        global primary_direction, secondary_direction
         primary_direction = new_primary_direction
         secondary_direction = new_secondary_direction
 
@@ -476,7 +475,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     new_primary_direction, _, _ = calculate_supertrend_with_clusters(
         high, low, close, assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
     )
-    new_secondary_direction, _, _ = calculate_supertrend_with_clusters(
+    new_secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
         high, low, close, assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
     )
 
@@ -488,7 +487,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     stop_loss = None
     take_profit = None
     if entry_price is not None:
-        stop_loss = calculate_supertrend_with_clusters.secondary_lower_band.iloc[-1]
+        stop_loss = secondary_lower_band.iloc[-1]
         take_profit = stop_loss * 1.5
 
         if price <= stop_loss:
@@ -529,6 +528,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     )
 
     return primary_direction, secondary_direction
+
 
 # Update dash
 def update_dashboard():
