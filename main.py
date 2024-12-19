@@ -153,7 +153,7 @@ def calculate_atr(high, low, close):
 def initialize_historical_data():
     global high, low, close, volatility
     try:
-        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="30s", limit=100 + ATR_LEN)
+        klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
         data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume",
                                              "close_time", "quote_asset_volume", "number_of_trades",
                                              "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
@@ -383,7 +383,7 @@ def start_websocket():
             twm.start()
 
             # Start streaming 5-minute candles
-            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="30s")
+            twm.start_kline_socket(callback=on_message, symbol=BINANCE_SYMBOL.lower(), interval="1m")
             twm.join()  # Keep the WebSocket connection open
         except Exception as e:
             logging.error(f"WebSocket connection failed: {e}")
