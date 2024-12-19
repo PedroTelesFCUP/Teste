@@ -433,8 +433,10 @@ def heartbeat_logging():
             f"Entry Price: {entry_price if entry_price else 'None'}\n"
             f"Stop Loss: {stop_loss_display}\n"
             f"Take Profit: {take_profit_display}\n"
-            f"300-Second Primary Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_history)}\n"
-            f"300-Second Primary Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_history)}\n"
+            f"Primary Upper Band (Current): {primary_upper_band.iloc[-1]:.2f}\n"
+            f"Primary Lower Band (Current): {primary_lower_band.iloc[-1]:.2f}\n"
+            f"Secondary Upper Band (Current): {secondary_upper_band.iloc[-1]:.2f}\n"
+            f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
             f"=========================="
         )
     except Exception as e:
@@ -497,8 +499,8 @@ def calculate_and_execute(price):
     stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
     take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
     logging.info(
-        f"\n=== Signal Processing ===\n"
-        f"Price: {price:.2f}\n"
+        f"\n=== Heartbeat Logging ===\n"
+        f"Price: {last_price:.2f}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
         f"Dominant Cluster: {dominant_cluster}\n"
@@ -507,7 +509,11 @@ def calculate_and_execute(price):
         f"Entry Price: {entry_price if entry_price else 'None'}\n"
         f"Stop Loss: {stop_loss_display}\n"
         f"Take Profit: {take_profit_display}\n"
-        f"========================="
+        f"Primary Upper Band (Current): {primary_upper_band.iloc[-1]:.2f}\n"
+        f"Primary Lower Band (Current): {primary_lower_band.iloc[-1]:.2f}\n"
+        f"Secondary Upper Band (Current): {secondary_upper_band.iloc[-1]:.2f}\n"
+        f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
+        f"=========================="
     )
 
 
