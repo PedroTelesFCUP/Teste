@@ -460,10 +460,6 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
     secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
-    # Skip cycle if clustering fails
-    if primary_assigned_centroid is None or secondary_assigned_centroid is None:
-        logging.warning("Clustering failed for one or both signals. Skipping cycle.")
-        return primary_direction, secondary_direction
 
     # Calculate ATR and SuperTrend for primary and secondary signals
     new_primary_direction, _, _ = calculate_supertrend_with_clusters(
@@ -472,10 +468,6 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     new_secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
         high, low, close, secondary_assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
     )
-
-    # Update directions
-    primary_direction = new_primary_direction
-    secondary_direction = new_secondary_direction
 
     # Handle Stop-Loss and Take-Profit Logic
     stop_loss = None
