@@ -222,22 +222,57 @@ def initialize_direction(high, low, close):
         return 1  # Default to bullish if an error occurs
 
 # Calculate SuperTrend
-def calculate_supertrend_with_clusters(high, low, close, assigned_centroid):
-    hl2 = (high + low) / 2
-    upper_band = hl2 + ATR_FACTOR * assigned_centroid
-    lower_band = hl2 - ATR_FACTOR * assigned_centroid
+def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, initial_direction=None):
+    """
+    Calculate SuperTrend and determine the trading direction.
+    
+    :param high: List of high prices.
+    :param low: List of low prices.
+    :param close: List of close prices.
+    :param assigned_centroid: Volatility level determined by clustering.
+    :param initial_direction: Predefined initial direction (optional).
+    :return: Direction, upper_band, lower_band.
+    """
+    try:
+        # Convert to pandas Series if not already
+        high = pd.Series(high)
+        low = pd.Series(low)
+        close = pd.Series(close)
 
-    prev_upper_band = upper_band.shift(1)
-    prev_lower_band = lower_band.shift(1)
-    lower_band = lower_band.where(lower_band > prev_lower_band, prev_lower_band)
-    upper_band = upper_band.where(upper_band < prev_upper_band, prev_upper_band)
+        # Calculate HL2 (average of high and low)
+        hl2 = (high + low) / 2
 
-    if close.iloc[-1] > upper_band.iloc[-1]:
-        direction = -1
-    elif close.iloc[-1] < lower_band.iloc[-1]:
-        direction = 1
+        # Calculate upper and lower bands
+        upper_band = hl2 + ATR_FACTOR * assigned_centroid
+        lower_band = hl2 - ATR_FACTOR * assigned_centroid
 
-    return direction, upper_band, lower_band
+        # Ensure band continuity
+        prev_upper_band = upper_band.shift(1)
+        prev_lower_band = lower_band.shift(1)
+        lower_band = lower_band.where(lower_band > prev_lower_band, prev_lower_band)
+        upper_band = upper_band.where(upper_band < prev_upper_band, prev_upper_band)
+
+        # Initialize direction if needed
+        global last_direction
+        if last_direction is None:
+            logging.info("No initial direction found; determining from historical data.")
+            last_direction = initialize_direction(high.tolist(), low.tolist(), close.tolist())
+            logging.info(f"Initial direction set to: {'Bullish (1)' if last_direction == 1 else 'Bearish (-1)'}")
+        
+        # Determine direction based on latest close price
+        if close.iloc[-1] > upper_band.iloc[-1]:
+            direction = -1  # Bearish
+        elif close.iloc[-1] < lower_band.iloc[-1]:
+            direction = 1   # Bullish
+        else:
+            direction = last_direction  # Maintain current direction if no crossover
+
+        return direction, upper_band, lower_band
+
+    except Exception as e:
+        logging.error(f"Error in calculate_supertrend_with_clusters: {e}")
+        return None, None, None
+
 
 # Execute Trades
 def execute_trade(symbol, quantity, side):
