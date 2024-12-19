@@ -631,8 +631,8 @@ if __name__ == "__main__":
     initialize_historical_data()
     
     # Initialize primary and secondary directions
-    primary_direction = initialize_direction(high, low, close, signal_type="primary")
-    secondary_direction = initialize_direction(high, low, close, signal_type="secondary")
+    primary_direction = initialize_direction(high, low, close, assigned_centroid)
+    secondary_direction = initialize_direction(high, low, close, assigned_centroid)
     logging.info(f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}")
     logging.info(f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}")
 
