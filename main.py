@@ -57,7 +57,7 @@ logging.info("Trading bot initialized.")
 # Global Variables
 volatility = []
 last_price = None
-last_direction = 0
+last_direction = 1 # default as Bullish
 last_signal_time = 0
 last_log_time = 0  # New variable for heartbeat logs
 high, low, close = [], [], []
