@@ -517,7 +517,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
         f"=========================="
     )
 
-    return primary_direction, secondary_direction
+    return new_primary_direction, new_secondary_direction
 
 
 
