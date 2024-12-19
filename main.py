@@ -287,20 +287,23 @@ def heartbeat_logging():
 
 # Signal Processing
 def calculate_and_execute(price):
-    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history, entry_price, take_profit_price, label, last_label, current_label, last_price
+    global last_direction, upper_band_300_history, lower_band_300_history, entry_price, take_profit_price
 
     # Ensure critical variables are initialized
     if not volatility or len(volatility) < 3:
-        raise ValueError("Volatility data is insufficient. Ensure the volatility list has at least 3 values.")
+        logging.warning("Volatility data is insufficient. Skipping this cycle.")
+        return
 
     # Perform clustering and calculate bands
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant = cluster_volatility(volatility)
     if assigned_centroid is None:
-        raise ValueError("Assigned centroid from clustering is None. Clustering failed or data is insufficient.")
+        logging.warning("Assigned centroid from clustering is None. Clustering failed or data is insufficient.")
+        return
 
     # Ensure high, low, and close lists are populated
     if len(high) < ATR_LEN or len(low) < ATR_LEN or len(close) < ATR_LEN:
-        raise ValueError("High, low, or close data is insufficient for ATR calculation.")
+        logging.warning("High, low, or close data is insufficient for ATR calculation. Skipping this cycle.")
+        return
 
     # Calculate ATR and SuperTrend
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
@@ -322,54 +325,23 @@ def calculate_and_execute(price):
     buy_signal = any(price < band for band in lower_band_300_history)
     sell_signal = any(price > band for band in upper_band_300_history)
 
+    if not buy_signal and not sell_signal:
+        logging.warning(f"Price: {price:.2f} did not trigger any buy or sell conditions. Upper bands: {upper_band_300_history}, Lower bands: {lower_band_300_history}")
+        return
+
     # Determine the direction based on signals
-    if buy_signal:
-        direction = 1
-    elif sell_signal:
-        direction = -1
-    else:
-        raise ValueError("Neither buy nor sell signal detected. Price does not trigger any condition.")
+    direction = 1 if buy_signal else -1
 
-    # Use the first SuperTrend (direction) for overall trend confirmation
-    is_bullish = direction == 1  # Green cloud indicates a bullish trend
-    is_bearish = direction == -1  # Red cloud indicates a bearish trend
-
-    # Detect pullback signals
-    pullback_buy = last_label == "red" and label == "green" and is_bullish
-    if not pullback_buy and not is_bullish and not is_bearish:
-        raise ValueError("No actionable signal detected. Pullback and trend confirmation conditions are unmet.")
-
-    logging.info(f"Pullback Buy Conditions: Last Label: {last_label}, Current Label: {label}, Is Bullish: {is_bullish}")
-
-    # Update last_label for the next cycle
-    last_label = label
-
-    # Logging
-    logging.info(
-        f"\n=== Signal Processing ===\n"
-        f"Price: {price:.2f}\n"
-        f"ATR: {atr:.2f}\n"
-        f"Last Label: {last_label}, Current Label: {label}\n"
-        f"Volatility Level: {volatility_level}\n"
-        f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids) if centroids else 'N/A'}\n"
-        f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes) if cluster_sizes else 'N/A'}\n"
-        f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
-        f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history) if upper_band_300_history else 'N/A'}\n"
-        f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history) if lower_band_300_history else 'N/A'}\n"
-        f"========================="
-    )
-
-    # Check if Cluster 3 is dominant before proceeding with trade logic
-    if not is_cluster_3_dominant:
-        raise ValueError("Cluster 3 is not dominant. Trade conditions are unmet.")
-
-    # Combine all conditions for a buy signal
-    if pullback_buy and is_cluster_3_dominant:
-        logging.info(f"Buy signal confirmed at {price:.2f}. Taking long position.")
+    # Use direction for trade logic
+    if direction == 1:
+        logging.info(f"Buy signal detected at {price:.2f}. Taking long position.")
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
         entry_price = price  # Store entry price for take-profit calculation
         take_profit_price = entry_price * 1.015  # Set take profit at 1.5% above entry
         logging.info(f"Take-profit level set at {take_profit_price:.2f} for entry price {entry_price:.2f}.")
+    elif direction == -1:
+        logging.info(f"Sell signal detected at {price:.2f}. Taking short position.")
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
 
     # Check for take profit
     if entry_price is not None and take_profit_price is not None:
