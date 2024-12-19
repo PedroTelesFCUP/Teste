@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import numpy as np
 import pandas as pd
@@ -120,21 +121,34 @@ dash_app.layout = html.Div([
 ])
 
 # Perform K-Means Clustering on volatility
-# Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
-    if len(volatility) < n_clusters:
-        logging.warning("Not enough data points for clustering. Skipping.")
-        return None, None, None, None, None
+    """
+    Perform K-Means clustering on volatility data.
 
+    :param volatility: List of volatility values.
+    :param n_clusters: Number of clusters to create.
+    :return: Centroids, assigned cluster, assigned centroid, cluster sizes, and dominant cluster.
+    """
     try:
+        # Input validation
+        if len(volatility) < n_clusters:
+            logging.warning(f"Not enough data points for clustering. Need at least {n_clusters}, got {len(volatility)}.")
+            return None, None, None, None, None
+
+        if not isinstance(volatility, (list, np.ndarray)):
+            logging.error("Volatility data must be a list or numpy array.")
+            return None, None, None, None, None
+
+        # Prepare data for clustering
         volatility = np.array(volatility).reshape(-1, 1)
+
+        # Perform K-Means clustering
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
+        # Extract clustering results
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
-
-        # Calculate cluster sizes directly
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
 
         # Identify the cluster of the latest volatility value
@@ -146,43 +160,99 @@ def cluster_volatility(volatility, n_clusters=3):
         dominant_cluster = np.argmax(cluster_sizes)  # Cluster with the largest size
         dominance = dominant_cluster + 1  # Convert to 1-based index for human readability
 
+        # Logging details
+        logging.info(
+            f"Clustering completed: "
+            f"Centroids = {', '.join(f'{x:.2f}' for x in centroids)}, "
+            f"Cluster Sizes = {', '.join(map(str, cluster_sizes))}, "
+            f"Assigned Cluster = {assigned_cluster + 1}, "
+            f"Dominant Cluster = {dominance}"
+        )
+
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominance
+
     except Exception as e:
-        logging.error(f"Clustering failed: {e}")
+        logging.error(f"Clustering failed: {e}", exc_info=True)
         return None, None, None, None, None
+
 
 
 # Calculate ATR
 def calculate_atr(high, low, close):
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(window=ATR_LEN).mean().iloc[-1]
+    """
+    Calculate the Average True Range (ATR).
+    
+    :param high: Series of high prices.
+    :param low: Series of low prices.
+    :param close: Series of close prices.
+    :return: Latest ATR value or None if calculation fails.
+    """
+    try:
+        # Input validation
+        if len(high) < ATR_LEN or len(low) < ATR_LEN or len(close) < ATR_LEN:
+            logging.warning("Insufficient data for ATR calculation.")
+            return None
+
+        # Calculate True Range (TR) components
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        # Calculate ATR
+        atr = tr.rolling(window=ATR_LEN).mean()
+
+        # Return the latest ATR value
+        if len(atr.dropna()) > 0:
+            return atr.iloc[-1]
+        else:
+            logging.warning("ATR calculation resulted in NaN values.")
+            return None
+    except Exception as e:
+        logging.error(f"Error calculating ATR: {e}", exc_info=True)
+        return None
+
 
 # Initialize Volatility and Historical Data
 def initialize_historical_data():
+    """
+    Initializes historical market data for high, low, close prices, and volatility.
+    """
     global high, low, close, volatility
     try:
+        # Fetch historical data from Binance
+        logging.info(f"Fetching historical data for {BINANCE_SYMBOL} with interval 1m.")
         klines = binance_client.get_klines(symbol=BINANCE_SYMBOL, interval="1m", limit=100 + ATR_LEN)
+        
+        # Convert to DataFrame and process
         data = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume",
                                              "close_time", "quote_asset_volume", "number_of_trades",
                                              "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
+        
+        # Convert relevant columns to floats
         high = data["high"].astype(float).tolist()
         low = data["low"].astype(float).tolist()
         close = data["close"].astype(float).tolist()
 
+        # Calculate True Range (TR) components
         tr1 = data["high"].astype(float) - data["low"].astype(float)
         tr2 = abs(data["high"].astype(float) - data["close"].shift(1).astype(float))
         tr3 = abs(data["low"].astype(float) - data["close"].shift(1).astype(float))
+        
+        # Calculate the Average True Range (ATR)
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = tr.rolling(window=ATR_LEN).mean()
 
+        # Update volatility
         volatility = atr[-100:].dropna().tolist()
-        logging.info(f"Initialized historical data with {len(close)} entries and {len(volatility)} ATR values.")
+        if not volatility:
+            logging.warning("ATR calculation resulted in insufficient data for volatility.")
+        
+        logging.info(f"Initialized historical data for {BINANCE_SYMBOL} with {len(close)} close entries "
+                     f"and {len(volatility)} valid ATR values.")
     except Exception as e:
-        logging.error(f"Error initializing historical data: {e}")
-        high, low, close, volatility = [], [], [], []
+        logging.error(f"Error initializing historical data for {BINANCE_SYMBOL}: {e}")
+        high, low, close, volatility = [], [], [], []  # Reset to empty lists on failure
 
 def initialize_direction(high, low, close, signal_type="primary"):
     """
@@ -217,7 +287,7 @@ def initialize_direction(high, low, close, signal_type="primary"):
 
 
 # Calculate SuperTrend
-def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, initial_direction=None):
+def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, atr_factor):
     """
     Calculate SuperTrend and determine the trading direction.
     
@@ -225,7 +295,7 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, init
     :param low: List of low prices.
     :param close: List of close prices.
     :param assigned_centroid: Volatility level determined by clustering.
-    :param initial_direction: Predefined initial direction (optional).
+    :param atr_factor: ATR multiplier for calculating bands.
     :return: Direction, upper_band, lower_band.
     """
     try:
@@ -238,8 +308,8 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, init
         hl2 = (high + low) / 2
 
         # Calculate upper and lower bands
-        upper_band = hl2 + ATR_FACTOR * assigned_centroid
-        lower_band = hl2 - ATR_FACTOR * assigned_centroid
+        upper_band = hl2 + atr_factor * assigned_centroid
+        lower_band = hl2 - atr_factor * assigned_centroid
 
         # Ensure band continuity
         prev_upper_band = upper_band.shift(1)
@@ -247,42 +317,63 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, init
         lower_band = lower_band.where(lower_band > prev_lower_band, prev_lower_band)
         upper_band = upper_band.where(upper_band < prev_upper_band, prev_upper_band)
 
-        # Initialize direction if needed
-        global last_direction
-        if last_direction is None:
-            logging.info("No initial direction found; determining from historical data.")
-            last_direction = initialize_direction(high.tolist(), low.tolist(), close.tolist())
-            logging.info(f"Initial direction set to: {'Bullish (1)' if last_direction == 1 else 'Bearish (-1)'}")
-        
-        # Determine direction based on latest close price
+        # Determine direction based on the latest close price
         if close.iloc[-1] > upper_band.iloc[-1]:
             direction = -1  # Bearish
         elif close.iloc[-1] < lower_band.iloc[-1]:
             direction = 1   # Bullish
         else:
-            direction = last_direction  # Maintain current direction if no crossover
+            direction = 0  # No change in direction
 
         return direction, upper_band, lower_band
 
     except Exception as e:
-        logging.error(f"Error in calculate_supertrend_with_clusters: {e}")
+        logging.error(f"Error in calculate_supertrend_with_clusters (centroid={assigned_centroid}, atr_factor={atr_factor}): {e}")
         return None, None, None
 
 
 # Execute Trades
 def execute_trade(symbol, quantity, side):
+    """
+    Executes a trade order with Alpaca and handles errors.
+    
+    :param symbol: The trading symbol (e.g., BTC/USD).
+    :param quantity: The quantity to trade.
+    :param side: The side of the trade ("buy" or "sell").
+    """
     try:
-        logging.info(f"Submitting {side} order for {quantity} {symbol}.")
-        alpaca_api.submit_order(
+        logging.info(f"Attempting to {side} {quantity} units of {symbol}.")
+        
+        # Submit the order to Alpaca
+        order = alpaca_api.submit_order(
             symbol=symbol,
             qty=quantity,
             side=side,
             type="market",
             time_in_force="gtc"
         )
-        logging.info(f"{side.capitalize()} order submitted successfully.")
+        
+        # Confirm order status
+        logging.info(f"{side.capitalize()} order submitted successfully. Order ID: {order.id}")
+        
+        # Retrieve and log order details
+        order_details = alpaca_api.get_order(order.id)
+        logging.info(
+            f"Order Details:\n"
+            f"Symbol: {order_details.symbol}\n"
+            f"Quantity: {order_details.qty}\n"
+            f"Filled Quantity: {order_details.filled_qty}\n"
+            f"Side: {order_details.side}\n"
+            f"Status: {order_details.status}\n"
+            f"Submitted At: {order_details.submitted_at}"
+        )
+        
+        # Handle partial fills
+        if order_details.status not in ["filled", "partially_filled"]:
+            logging.warning(f"Order status: {order_details.status}. Please check manually.")
+    
     except Exception as e:
-        logging.error(f"Error executing {side} order: {e}")
+        logging.error(f"Error executing {side} order for {symbol}: {e}", exc_info=True)
 
 # Function for Heartbeat Logging
 def heartbeat_logging():
@@ -302,13 +393,11 @@ def heartbeat_logging():
             return
 
         # Calculate ATR and SuperTrend for both signals
-        atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-
         primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
-            pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, initial_direction=primary_direction
+            pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, PRIMARY_ATR_FACTOR
         )
         secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
-            pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, initial_direction=secondary_direction
+            pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, SECONDARY_ATR_FACTOR
         )
 
         # Stop-Loss and Take-Profit Logic
@@ -319,39 +408,40 @@ def heartbeat_logging():
             take_profit = stop_loss * 1.5  # Take-profit is 1.5 times the lower band value
 
         # Update band history
-        upper_band_history.append(float(primary_upper_band.iloc[-1]))
-        lower_band_history.append(float(primary_lower_band.iloc[-1]))
-        if len(upper_band_history) > 4:
-            upper_band_history.pop(0)
-        if len(lower_band_history) > 4:
-            lower_band_history.pop(0)
+        if len(primary_upper_band) > 0 and len(primary_lower_band) > 0:
+            upper_band_history.append(float(primary_upper_band.iloc[-1]))
+            lower_band_history.append(float(primary_lower_band.iloc[-1]))
+            if len(upper_band_history) > 4:
+                upper_band_history.pop(0)
+            if len(lower_band_history) > 4:
+                lower_band_history.pop(0)
+
+        # Stop-Loss and Take-Profit Display
+        stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
+        take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
 
         # Logging detailed information
         logging.info(
             f"\n=== Heartbeat Logging ===\n"
             f"Price: {last_price:.2f}\n"
-            f"ATR: {atr:.2f}\n"
             f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
             f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
             f"Dominant Cluster: {dominant_cluster}\n"
             f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
             f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
             f"Entry Price: {entry_price if entry_price else 'None'}\n"
-            f"Stop Loss: {stop_loss if entry_price else 'None'}\n"
-            f"Take Profit: {take_profit if entry_price else 'None'}\n"
-            f"300-Second Primary Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
-            f"300-Second Primary Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
+            f"Stop Loss: {stop_loss_display}\n"
+            f"Take Profit: {take_profit_display}\n"
+            f"300-Second Primary Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_history)}\n"
+            f"300-Second Primary Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_history)}\n"
             f"=========================="
         )
     except Exception as e:
         logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
 
-
-
 # Signal Processing
 def calculate_and_execute(price):
-    global primary_direction, secondary_direction, upper_band_history, lower_band_history
-    global upper_band_300_history, lower_band_300_history, entry_price
+    global primary_direction, secondary_direction, entry_price
 
     if not volatility or len(volatility) < 3:
         logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
@@ -364,22 +454,21 @@ def calculate_and_execute(price):
         return
 
     # Calculate ATR and SuperTrend for both signals
-    atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
-
     prev_secondary_direction = secondary_direction  # Save the previous secondary direction for comparison
     primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
-        pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, initial_direction=primary_direction
+        pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, PRIMARY_ATR_FACTOR
     )
     secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
-        pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, initial_direction=secondary_direction
+        pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, SECONDARY_ATR_FACTOR
     )
 
     # Stop-Loss and Take-Profit Logic
+    stop_loss = None
+    take_profit = None
     if entry_price is not None:
         stop_loss = secondary_lower_band.iloc[-1]  # Lower band of the secondary signal
         take_profit = stop_loss * 1.5  # Take-profit is 1.5 times the lower band value
 
-        # Exit trade based on stop-loss or take-profit
         if price <= stop_loss:
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
             logging.info(f"Stop-loss triggered. Exiting trade. Price: {price:.2f}")
@@ -397,38 +486,26 @@ def calculate_and_execute(price):
         prev_secondary_direction == -1 and secondary_direction == 1  # Secondary signal changes from bearish to bullish
     )
 
-    # Sell Signal Logic
-    sell_signal = (
-        dominant_cluster == 3 and  # High volatility cluster is dominant
-        primary_direction == -1 and  # Primary signal is bearish
-        prev_secondary_direction == 1 and secondary_direction == -1  # Secondary signal changes from bullish to bearish
-    )
-
     # Execute Buy Signal
     if buy_signal and entry_price is None:
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
         entry_price = price  # Set entry price
         logging.info(f"Buy signal triggered. Entry price: {price:.2f}")
 
-    # Execute Sell Signal
-    elif sell_signal and entry_price is None:
-        execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-        entry_price = price  # Set entry price
-        logging.info(f"Sell signal triggered. Entry price: {price:.2f}")
-
     # Logging
+    stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
+    take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
     logging.info(
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
-        f"ATR: {atr:.2f}\n"
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
         f"Dominant Cluster: {dominant_cluster}\n"
         f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
         f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
         f"Entry Price: {entry_price if entry_price else 'None'}\n"
-        f"Stop Loss: {stop_loss if entry_price else 'None'}\n"
-        f"Take Profit: {take_profit if entry_price else 'None'}\n"
+        f"Stop Loss: {stop_loss_display}\n"
+        f"Take Profit: {take_profit_display}\n"
         f"========================="
     )
 
@@ -436,34 +513,27 @@ def calculate_and_execute(price):
 
 # Update dash
 def update_dashboard():
-    global high, low, close, upper_band_history, lower_band_history, last_price, last_direction
+    global high, low, close, upper_band_history, lower_band_history, last_price, primary_direction, secondary_direction
 
     # Create price and bands chart
     fig = go.Figure()
     fig.add_trace(go.Scatter(y=close[-10:], mode='lines', name='Price', line=dict(color='blue')))
-    fig.add_trace(go.Scatter(y=upper_band_history[-10:], mode='lines', name='Upper Band', line=dict(color='green')))
-    fig.add_trace(go.Scatter(y=lower_band_history[-10:], mode='lines', name='Lower Band', line=dict(color='red')))
+    fig.add_trace(go.Scatter(y=upper_band_history[-10:], mode='lines', name='Primary Upper Band', line=dict(color='green')))
+    fig.add_trace(go.Scatter(y=lower_band_history[-10:], mode='lines', name='Primary Lower Band', line=dict(color='red')))
 
     # Create table rows for metrics
     metrics = [
         ["Last Price", f"{last_price:.2f}" if last_price else "N/A"],
-        ["Direction", f"{'Bullish' if last_direction == 1 else 'Bearish' if last_direction == -1 else 'Neutral'}"],
-        ["Upper Band", f"{upper_band_history[-1]:.2f}" if upper_band_history else "N/A"],
-        ["Lower Band", f"{lower_band_history[-1]:.2f}" if lower_band_history else "N/A"],
+        ["Primary Direction", f"{'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}"],
+        ["Secondary Direction", f"{'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}"],
+        ["Primary Upper Band", f"{upper_band_history[-1]:.2f}" if upper_band_history else "N/A"],
+        ["Primary Lower Band", f"{lower_band_history[-1]:.2f}" if lower_band_history else "N/A"],
         ["High (last)", f"{high[-1]:.2f}" if high else "N/A"],
         ["Low (last)", f"{low[-1]:.2f}" if low else "N/A"]
     ]
     rows = [html.Tr([html.Th(metric[0]), html.Td(metric[1])]) for metric in metrics]
 
     return fig, rows
-
-@dash_app.callback(
-    [Output('price-chart', 'figure'),
-     Output('metrics-table', 'children')],
-    [Input('update-interval', 'n_intervals')]
-)
-def refresh_dashboard(n):
-    return update_dashboard()
 
 # WebSocket Handler
 def on_message(msg):
@@ -529,20 +599,20 @@ def process_signals():
     while True:
         current_time = time.time()
 
-        # Check for signal processing (every 300 seconds, starting slightly earlier)
-        if current_time - last_signal_time >= SIGNAL_INTERVAL - sync_offset:
-            if last_price is not None:
-                try:
+        try:
+            # Signal processing every SIGNAL_INTERVAL seconds
+            if current_time - last_signal_time >= SIGNAL_INTERVAL:
+                if last_price is not None:
                     calculate_and_execute(last_price)
-                except Exception as e:
-                    logging.error(f"Error during signal processing: {e}", exc_info=True)
-            last_signal_time = current_time + sync_offset  # Adjust for sync offset
-            last_heartbeat_time = current_time + sync_offset  # Skip heartbeat logging at this time
+                last_signal_time = current_time  # Update the last signal time
 
-        # Check for heartbeat logging (every 30 seconds, starting slightly earlier)
-        elif current_time - last_heartbeat_time >= 30 - sync_offset:
-            heartbeat_logging()  # Just logs the state
-            last_heartbeat_time = current_time + sync_offset
+            # Heartbeat logging every 30 seconds
+            if current_time - last_heartbeat_time >= 30:
+                heartbeat_logging()
+                last_heartbeat_time = current_time  # Update the last heartbeat time
+
+        except Exception as e:
+            logging.error(f"Error in process_signals loop: {e}", exc_info=True)
 
         # Sleep for a small interval to avoid excessive CPU usage
         time.sleep(1)
@@ -550,20 +620,15 @@ def process_signals():
 
 # Main Script Entry Point
 if __name__ == "__main__":
-    initialize_historical_data()  # Initialize historical data
+    # Initialize historical data
+    initialize_historical_data()
+    
+    # Initialize primary and secondary directions
+    primary_direction = initialize_direction(high, low, close, signal_type="primary")
+    secondary_direction = initialize_direction(high, low, close, signal_type="secondary")
+    logging.info(f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}")
+    logging.info(f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}")
 
-    try:
-        primary_direction = initialize_direction(high, low, close, signal_type="primary")
-        secondary_direction = initialize_direction(high, low, close, signal_type="secondary")
-        logging.info(f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}")
-        logging.info(f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}")
-    except Exception as e:
-        logging.error(f"Failed to initialize directions: {e}")
-        primary_direction = 1  # Default to bullish
-        secondary_direction = 1  # Default to bullish
-        logging.info("Defaulted both primary and secondary directions to Bullish (1) due to error.")
-
-        
     # Start Flask app in a separate thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
     time.sleep(10)
