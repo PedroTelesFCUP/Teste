@@ -61,6 +61,7 @@ volatility = []
 last_price = None
 last_direction = 1 # default as Bullish
 last_signal_time = 0
+last_heartbeat_time = 0  # Initialize heartbeat time
 last_log_time = 0  # New variable for heartbeat logs
 high, low, close = [], [], []
 upper_band_history = []
