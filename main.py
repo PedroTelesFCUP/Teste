@@ -291,44 +291,29 @@ def initialize_direction(high, low, close, atr_factor, assigned_centroid):
 def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, atr_factor, previous_direction):
     """
     Calculate SuperTrend and determine the trading direction with persistence logic.
-
-    :param high: List of high prices.
-    :param low: List of low prices.
-    :param close: List of close prices.
-    :param assigned_centroid: Volatility level determined by clustering.
-    :param atr_factor: ATR multiplier for calculating bands.
-    :param previous_direction: Last known direction (1 for bullish, -1 for bearish).
-    :return: Direction, upper_band, lower_band.
     """
     try:
-        # Convert to pandas Series if not already
         high = pd.Series(high)
         low = pd.Series(low)
         close = pd.Series(close)
 
         # Calculate HL2 (average of high and low)
         hl2 = (high + low) / 2
-
-        # Calculate upper and lower bands
         upper_band = hl2 + atr_factor * assigned_centroid
         lower_band = hl2 - atr_factor * assigned_centroid
 
         # Ensure band continuity
-        prev_upper_band = upper_band.shift(1)
-        prev_lower_band = lower_band.shift(1)
-        lower_band = lower_band.where(lower_band > prev_lower_band, prev_lower_band)
-        upper_band = upper_band.where(upper_band < prev_upper_band, prev_upper_band)
+        upper_band = upper_band.where(upper_band < upper_band.shift(1), upper_band.shift(1))
+        lower_band = lower_band.where(lower_band > lower_band.shift(1), lower_band.shift(1))
 
-        # Determine direction based on the latest close price
+        # Determine direction
         if close.iloc[-1] > upper_band.iloc[-1]:
             direction = -1  # Bearish
         elif close.iloc[-1] < lower_band.iloc[-1]:
             direction = 1   # Bullish
         else:
-            # Maintain the previous direction if the price is between bands
-            direction = previous_direction
+            direction = previous_direction  # Persist direction
 
-        # Return results
         return direction, upper_band, lower_band
 
     except Exception as e:
@@ -486,10 +471,12 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     # Handle Stop-Loss and Take-Profit Logic
     stop_loss = None
     take_profit = None
-    if entry_price is not None:
+
+    if secondary_lower_band is not None and secondary_upper_band is not None:
         stop_loss = secondary_lower_band.iloc[-1]
         take_profit = stop_loss * 1.5
 
+    if entry_price is not None:
         if price <= stop_loss:
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
             logging.info(f"Stop-loss triggered. Exiting trade. Price: {price:.2f}")
@@ -499,6 +486,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
             logging.info(f"Take-profit triggered. Exiting trade. Price: {price:.2f}")
             entry_price = None  # Reset entry price
+
 
     # Execute Buy Signal if conditions are met
     buy_signal = (
