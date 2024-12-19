@@ -294,7 +294,7 @@ def heartbeat_logging():
             f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
             f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
             f"High Volatility Cluster (Cluster 3): Centroid = {centroids[-1]:.2f}, Size = {cluster_sizes[-1]}\n"
-            f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+            f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
             f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
             f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
             f"=========================="
@@ -350,7 +350,7 @@ def calculate_and_execute(price):
         f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
         f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
         f"High Volatility Cluster (Cluster 3): Centroid = {centroids[-1]:.2f}, Size = {cluster_sizes[-1]}\n"
-        f"Direction: {'Neutral (0)' if direction == 0 else 'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
+        f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
         f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
         f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
         f"========================="
@@ -479,6 +479,7 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Failed to initialize direction: {e}")
         last_direction = 1  # Default fallback to bullish
+        logging.info("Defaulting to Bullish (1) due to error.")
         
     # Start Flask app in a separate thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
