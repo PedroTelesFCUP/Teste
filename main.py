@@ -77,6 +77,7 @@ entry_price = None
 trade_direction = None  # 1 for buy, -1 for sell
 last_label = None  # Initialize last_label to None
 current_label = None  # Initialize current_label to None
+label = None  # Tracks the current label, "green" or "red"
 entry_price = None
 take_profit_price = None
 
@@ -234,6 +235,7 @@ def execute_trade(symbol, quantity, side):
 
 # Function for Heartbeat Logging
 def heartbeat_logging():
+    global last_label, label, last_price, upper_band_history, lower_band_history, current_label
     """
     Logs current status and data every LOG_INTERVAL seconds for monitoring purposes.
     Updates band history to ensure data is current.
@@ -263,18 +265,21 @@ def heartbeat_logging():
         if len(lower_band_history) > 4:
             lower_band_history.pop(0)
 
-        # Logging detailed information
+        # Ensure last_label is updated to reflect the current label
+        last_label = label
+
+        # Log detailed information with safe fallbacks
         logging.info(
             f"\n=== Heartbeat Logging ===\n"
-            f"Price: {last_price:.2f}\n"
+            f"Price: {last_price:.2f}" if last_price is not None else "Price: N/A\n"
             f"ATR: {atr:.2f}\n"
-            f"Last Label: {last_label}, Current Label: {current_label}\n"
+            f"Last Label: {last_label}, Current Label: {label}\n"
             f"Volatility Level: {volatility_level}\n"
-            f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
-            f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-            f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
-            f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
-            f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
+            f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids) if centroids else 'N/A'}\n"
+            f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes) if cluster_sizes else 'N/A'}\n"
+            f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)' if direction == -1 else 'N/A'}\n"
+            f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history) if upper_band_300_history else 'N/A'}\n"
+            f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history) if lower_band_300_history else 'N/A'}\n"
             f"=========================="
         )
     except Exception as e:
@@ -282,18 +287,22 @@ def heartbeat_logging():
 
 # Signal Processing
 def calculate_and_execute(price):
-    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history, entry_price, take_profit_price
+    global last_direction, upper_band_history, lower_band_history, upper_band_300_history, lower_band_300_history, entry_price, take_profit_price, label, last_label, current_label, last_price
 
+    # Ensure critical variables are initialized
     if not volatility or len(volatility) < 3:
-        logging.warning("Volatility list is empty or insufficient. Skipping this cycle.")
-        return
+        raise ValueError("Volatility data is insufficient. Ensure the volatility list has at least 3 values.")
 
     # Perform clustering and calculate bands
     centroids, assigned_cluster, assigned_centroid, cluster_sizes, volatility_level, is_cluster_3_dominant = cluster_volatility(volatility)
     if assigned_centroid is None:
-        logging.warning("Clustering failed. Skipping cycle.")
-        return
+        raise ValueError("Assigned centroid from clustering is None. Clustering failed or data is insufficient.")
 
+    # Ensure high, low, and close lists are populated
+    if len(high) < ATR_LEN or len(low) < ATR_LEN or len(close) < ATR_LEN:
+        raise ValueError("High, low, or close data is insufficient for ATR calculation.")
+
+    # Calculate ATR and SuperTrend
     atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close))
     direction, upper_band, lower_band = calculate_supertrend_with_clusters(
         pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid
@@ -318,32 +327,41 @@ def calculate_and_execute(price):
         direction = 1
     elif sell_signal:
         direction = -1
+    else:
+        raise ValueError("Neither buy nor sell signal detected. Price does not trigger any condition.")
 
-    # Use the first Supertrend (direction) for overall trend confirmation
+    # Use the first SuperTrend (direction) for overall trend confirmation
     is_bullish = direction == 1  # Green cloud indicates a bullish trend
     is_bearish = direction == -1  # Red cloud indicates a bearish trend
 
     # Detect pullback signals
-    pullback_buy = last_label == "red" and current_label == "green" and is_bullish
-    logging.info(f"Pullback Buy Conditions: Last Label: {last_label}, Current Label: {current_label}, Is Bullish: {is_bullish}")
+    pullback_buy = last_label == "red" and label == "green" and is_bullish
+    if not pullback_buy and not is_bullish and not is_bearish:
+        raise ValueError("No actionable signal detected. Pullback and trend confirmation conditions are unmet.")
+
+    logging.info(f"Pullback Buy Conditions: Last Label: {last_label}, Current Label: {label}, Is Bullish: {is_bullish}")
+
+    # Update last_label for the next cycle
+    last_label = label
 
     # Logging
     logging.info(
         f"\n=== Signal Processing ===\n"
         f"Price: {price:.2f}\n"
         f"ATR: {atr:.2f}\n"
-        f"Last Label: {last_label}, Current Label: {current_label}\n"
+        f"Last Label: {last_label}, Current Label: {label}\n"
         f"Volatility Level: {volatility_level}\n"
-        f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
-        f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
+        f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids) if centroids else 'N/A'}\n"
+        f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes) if cluster_sizes else 'N/A'}\n"
         f"Direction: {'Bullish (1)' if direction == 1 else 'Bearish (-1)'}\n"
-        f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history)}\n"
-        f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history)}\n"
+        f"300-Second Upper Bands (Last 4): {', '.join(f'{x:.2f}' for x in upper_band_300_history) if upper_band_300_history else 'N/A'}\n"
+        f"300-Second Lower Bands (Last 4): {', '.join(f'{x:.2f}' for x in lower_band_300_history) if lower_band_300_history else 'N/A'}\n"
         f"========================="
     )
+
     # Check if Cluster 3 is dominant before proceeding with trade logic
     if not is_cluster_3_dominant:
-        logging.warning("Cluster 3 is not dominant. Skipping potential trade.")
+        raise ValueError("Cluster 3 is not dominant. Trade conditions are unmet.")
 
     # Combine all conditions for a buy signal
     if pullback_buy and is_cluster_3_dominant:
@@ -362,7 +380,6 @@ def calculate_and_execute(price):
 
     # Update last direction
     last_direction = direction
-
 
 # Update dash
 def update_dashboard():
@@ -398,7 +415,7 @@ def refresh_dashboard(n):
 
 # WebSocket Handler
 def on_message(msg):
-    global last_price, high, low, close, last_label, current_label, last_direction, initial_direction_calculated
+    global last_price, high, low, close, last_label, current_label, last_direction, initial_direction_calculated, label
 
     if 'k' not in msg:
         return
@@ -422,10 +439,11 @@ if not initial_direction_calculated and last_direction is None:
     if len(close) > 1:  # Ensure at least 2 values are available
         if close[-1] > close[-2]:
             last_direction = 1  # Bullish
-            current_label = "green"
+            label = "green"
         elif close[-1] < close[-2]:
             last_direction = -1  # Bearish
-            current_label = "red"
+            label = "red"
+
         
         # Update last_label during the first cycle
         last_label = current_label
@@ -438,17 +456,16 @@ if not initial_direction_calculated and last_direction is None:
 if len(close) > 10:
     if close[-1] > close[-10]:
         last_direction = 1  # Bullish
-        last_label = current_label  # Preserve the old label
-        current_label = "green"  # Update to the new label
+        label = "green"
     elif close[-1] < close[-10]:
         last_direction = -1  # Bearish
-        last_label = current_label  # Preserve the old label
-        current_label = "red"  # Update to the new label
+        label = "red"
+
     logging.info(f"Updated direction dynamically: {'Bullish' if last_direction == 1 else 'Bearish'}")
 
 
     # Update last_label to the previous value of current_label
-    last_label = current_label
+    last_label = label
 
     # Update current_label based on the last price relative to the bands
     if len(upper_band_300_history) > 0 and len(lower_band_300_history) > 0:
@@ -464,7 +481,8 @@ if len(close) > 10:
         current_label = "green" if last_direction == 1 else "red" if last_direction == -1 else None
 
     # Log the labels for monitoring
-    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {current_label}")
+    logging.info(f"Labels updated. Last Label: {last_label}, Current Label: {label}")
+
 
 
 # WebSocket Manager
