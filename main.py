@@ -321,7 +321,7 @@ def initialize_historical_data():
             secondary_volatility = []
 
         # Update volatility (generic list for legacy compatibility)
-        # volatility = primary_volatility
+        volatility = primary_volatility
 
         # Log initialization success or warning
         if not primary_volatility or not secondary_volatility:
