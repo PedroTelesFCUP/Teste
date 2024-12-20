@@ -111,9 +111,11 @@ dash_app = Dash(
     url_base_pathname="/dashboard/"
 )
 
+# Dashboard layout update
 dash_app.layout = html.Div([
     html.H1("Trading Bot Dashboard", style={'text-align': 'center'}),
-    dcc.Graph(id='price-chart', style={'height': '50vh'}),
+    dcc.Graph(id='primary-chart', style={'height': '50vh'}),
+    dcc.Graph(id='secondary-chart', style={'height': '50vh'}),
     html.H3("Metrics Table", style={'margin-top': '20px'}),
     html.Table(id='metrics-table', style={'width': '100%', 'border': '1px solid black'}),
     dcc.Interval(
@@ -122,6 +124,34 @@ dash_app.layout = html.Div([
         n_intervals=0
     )
 ])
+
+@dash_app.callback(
+    [Output('primary-chart', 'figure'),
+     Output('secondary-chart', 'figure'),
+     Output('metrics-table', 'children')],
+    [Input('update-interval', 'n_intervals')]
+)
+def update_dashboard_callback(n):
+    try:
+        # Fetch data for dashboard
+        fig_primary, rows = update_dashboard()
+        
+        # Calculate data for secondary signals
+        fig_secondary = plot_signals_with_markers(
+            high, low, close, secondary_direction, 
+            secondary_upper_band, secondary_lower_band, buy_sell_signals
+        )
+        
+        return fig_primary, fig_secondary, rows
+
+    except Exception as e:
+        logging.error(f"Error updating dashboard: {e}", exc_info=True)
+        # Return empty or placeholder data in case of an error
+        return (
+            go.Figure().update_layout(title="Primary Chart (Error)", template="plotly_white"),
+            go.Figure().update_layout(title="Secondary Chart (Error)", template="plotly_white"),
+            [html.Tr([html.Th("Error"), html.Td("An error occurred while updating the dashboard.")])]
+        )
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
@@ -579,29 +609,83 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
 
 
 
-# Update dash
+def plot_signals_with_markers(highs, lows, closes, directions, upper_band, lower_band, signals):
+    fig = go.Figure()
+
+    # Plot close prices
+    fig.add_trace(go.Scatter(x=list(range(len(closes))), y=closes, mode='lines', name='Close Price', line=dict(color='blue', width=2)))
+
+    # Plot upper and lower bands
+    fig.add_trace(go.Scatter(x=list(range(len(upper_band))), y=upper_band, mode='lines', name='Upper Band', line=dict(color='green', dash='dash')))
+    fig.add_trace(go.Scatter(x=list(range(len(lower_band))), y=lower_band, mode='lines', name='Lower Band', line=dict(color='red', dash='dash')))
+
+    # Add direction-based markers
+    for i, (price, direction) in enumerate(zip(closes, directions)):
+        color = 'green' if direction == 1 else 'red'
+        fig.add_trace(go.Scatter(x=[i], y=[price], mode='markers', marker=dict(color=color, size=8), name='Direction'))
+
+    # Add Buy/Sell signals
+    for i, signal in signals.items():
+        text = "Buy" if signal == "buy" else "Sell"
+        color = 'green' if signal == "buy" else 'red'
+        fig.add_trace(go.Scatter(x=[i], y=[closes[i]], mode='markers+text',
+                                 marker=dict(size=10, color=color),
+                                 text=text, textposition="top center"))
+
+    # Layout improvements
+    fig.update_layout(
+        title="Trading Signals with SuperTrend Logic",
+        xaxis_title="Time Steps",
+        yaxis_title="Price",
+        legend=dict(orientation="h"),
+        template="plotly_white"
+    )
+    return fig
+
+# Update the dashboard to include combined logging data
 def update_dashboard():
     global high, low, close, upper_band_history, lower_band_history, last_price, primary_direction, secondary_direction
 
+    # Dynamic range for y-axis
+    y_min = min(min(lower_band_history[-10:], default=0), min(close[-10:], default=0)) * 0.95
+    y_max = max(max(upper_band_history[-10:], default=0), max(close[-10:], default=0)) * 1.05
+
     # Create price and bands chart
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(y=close[-10:], mode='lines', name='Price', line=dict(color='blue')))
-    fig.add_trace(go.Scatter(y=upper_band_history[-10:], mode='lines', name='Primary Upper Band', line=dict(color='green')))
-    fig.add_trace(go.Scatter(y=lower_band_history[-10:], mode='lines', name='Primary Lower Band', line=dict(color='red')))
+    fig_primary = go.Figure()
+    fig_primary.add_trace(go.Scatter(y=close[-10:], mode='lines', name='Close Price', line=dict(color='blue')))
+    fig_primary.add_trace(go.Scatter(y=upper_band_history[-10:], mode='lines', name='Primary Upper Band', line=dict(color='green', dash='dash')))
+    fig_primary.add_trace(go.Scatter(y=lower_band_history[-10:], mode='lines', name='Primary Lower Band', line=dict(color='red', dash='dash')))
+    
+    # Set dynamic y-axis range
+    fig_primary.update_layout(
+        title="Primary Chart with Dynamic Range",
+        xaxis_title="Time Steps",
+        yaxis_title="Price",
+        yaxis=dict(range=[y_min, y_max]),
+        legend=dict(orientation="h"),
+        template="plotly_white"
+    )
 
     # Create table rows for metrics
     metrics = [
-        ["Last Price", f"{last_price:.2f}" if last_price else "N/A"],
-        ["Primary Direction", f"{'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}"],
-        ["Secondary Direction", f"{'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}"],
-        ["Primary Upper Band", f"{upper_band_history[-1]:.2f}" if upper_band_history else "N/A"],
-        ["Primary Lower Band", f"{lower_band_history[-1]:.2f}" if lower_band_history else "N/A"],
-        ["High (last)", f"{high[-1]:.2f}" if high else "N/A"],
-        ["Low (last)", f"{low[-1]:.2f}" if low else "N/A"]
+        ["Price", f"{last_price:.2f}" if last_price else "N/A"],
+        ["Primary Clustering Centroids", ", ".join(f"{x:.2f}" for x in primary_centroids)],
+        ["Primary Cluster Sizes", ", ".join(str(size) for size in primary_cluster_sizes)],
+        ["Primary Dominant Cluster", f"{primary_dominant_cluster}"],
+        ["Secondary Clustering Centroids", ", ".join(f"{x:.2f}" for x in secondary_centroids)],
+        ["Secondary Cluster Sizes", ", ".join(str(size) for size in secondary_cluster_sizes)],
+        ["Secondary Dominant Cluster", f"{secondary_dominant_cluster}"],
+        ["Primary ATR", f"{primary_volatility[-1]:.2f}"],
+        ["Secondary ATR", f"{secondary_volatility[-1]:.2f}"],
+        ["Primary Direction", "Bullish" if primary_direction == 1 else "Bearish"],
+        ["Secondary Direction", "Bullish" if secondary_direction == 1 else "Bearish"],
+        ["Entry Price", f"{entry_price:.2f}" if entry_price else "None"],
+        ["Stop Loss", f"{stop_loss:.2f}" if stop_loss else "None"],
+        ["Take Profit", f"{take_profit:.2f}" if take_profit else "None"]
     ]
     rows = [html.Tr([html.Th(metric[0]), html.Td(metric[1])]) for metric in metrics]
 
-    return fig, rows
+    return fig_primary, rows
 
 # WebSocket Handler
 def on_message(msg):
