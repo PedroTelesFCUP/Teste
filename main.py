@@ -194,68 +194,81 @@ def update_dashboard_callback(n):
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
     """
-    Perform K-means clustering on volatility with centroid stabilization.
+    Perform K-means clustering on volatility data with iterative centroid stabilization.
 
     Parameters:
     - volatility: List of volatility values.
     - n_clusters: Number of clusters (default is 3).
 
     Returns:
-    - centroids: Stabilized centroids of the clusters.
+    - centroids: Final stabilized centroids of the clusters.
     - cluster_sizes: Sizes of each cluster.
     - assigned_cluster: Cluster index for the most recent volatility value.
     - assigned_centroid: Centroid value of the assigned cluster.
-    - dominant_cluster: Index of the cluster with the highest size.
+    - dominant_cluster: Index of the cluster with the largest size.
     """
     try:
         # Ensure there are enough data points for clustering
         if len(volatility) < RECALC_INTERVAL:
+            logging.warning(f"Insufficient data for clustering. Required: {RECALC_INTERVAL}, Provided: {len(volatility)}")
             return [0.0] * n_clusters, [0] * n_clusters, None, None, None
 
-        # Initialize centroids using percentiles
+        # Define the window of volatility data for clustering
         window_volatility = volatility[-RECALC_INTERVAL:]
+
+        # Initialize centroids using percentiles for better spread
         centroids = [
             float(np.percentile(window_volatility, 75)),  # High volatility
             float(np.percentile(window_volatility, 50)),  # Medium volatility
             float(np.percentile(window_volatility, 25))   # Low volatility
         ]
 
-        # Iterative centroid stabilization
+        # Iteratively stabilize centroids
         while True:
-            # Initialize clusters
+            # Initialize empty clusters
             clusters = [[] for _ in range(n_clusters)]
 
-            # Assignment step: Assign points to the nearest centroid
+            # Assign points to the nearest centroid
             for value in window_volatility:
                 distances = [abs(value - c) for c in centroids]
                 nearest_cluster = distances.index(min(distances))
                 clusters[nearest_cluster].append(value)
 
-            # Update step: Calculate new centroids
+            # Compute new centroids
             new_centroids = [
-                np.mean(cluster) if cluster else centroids[i]
+                np.mean(cluster) if cluster else centroids[i]  # Retain old centroid if cluster is empty
                 for i, cluster in enumerate(clusters)
             ]
 
-            # Convergence check: If centroids stabilize, exit loop
-            if np.allclose(new_centroids, centroids, atol=1e-6):  # Tolerance of 1e-6
+            # Check for stabilization (tolerance for convergence)
+            if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
                 break
 
             # Update centroids for the next iteration
             centroids = new_centroids
 
-        # Calculate cluster sizes
+        # Compute cluster sizes
         cluster_sizes = [len(cluster) for cluster in clusters]
 
         # Assign the most recent volatility value to a cluster
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
-        assigned_cluster = distances.index(min(distances)) + 1  # 1-based index
+        assigned_cluster = distances.index(min(distances)) + 1  # 1-based indexing
         assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Determine the dominant cluster
-        dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
+        # Determine the dominant cluster based on size
+        dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1  # 1-based indexing
+
+        # Log results
+        logging.info(
+            f"Cluster Volatility Results:\n"
+            f"Centroids: {centroids}\n"
+            f"Cluster Sizes: {cluster_sizes}\n"
+            f"Assigned Cluster: {assigned_cluster}\n"
+            f"Assigned Centroid: {assigned_centroid}\n"
+            f"Dominant Cluster: {dominant_cluster}"
+        )
 
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
 
