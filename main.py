@@ -604,7 +604,50 @@ def update_dashboard():
     return fig, rows
 
 # WebSocket Handler
-last_secondary_directions = []
+def on_message(msg):
+    global last_price, high, low, close, primary_volatility, secondary_volatility
+    global last_secondary_directions, secondary_direction  # Ensure these are global
+
+    if 'k' not in msg:
+        return
+
+    candle = msg['k']
+    last_price = float(candle['c'])
+    high.append(float(candle['h']))
+    low.append(float(candle['l']))
+    close.append(float(candle['c']))
+
+    # Limit the length of historical data for high, low, close
+    if len(high) > ATR_LEN + 1:
+        high.pop(0)
+    if len(low) > ATR_LEN + 1:
+        low.pop(0)
+    if len(close) > ATR_LEN + 1:
+        close.pop(0)
+
+    # Update ATR for both signals
+    if len(high) >= ATR_LEN:
+        primary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=8)
+        secondary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=3)
+
+        if primary_atr:
+            primary_volatility.append(primary_atr)
+            if len(primary_volatility) > 100:
+                primary_volatility.pop(0)
+
+        if secondary_atr:
+            secondary_volatility.append(secondary_atr)
+            if len(secondary_volatility) > 100:
+                secondary_volatility.pop(0)
+
+    # Update secondary direction history
+    if secondary_direction is not None:
+        last_secondary_directions.append(secondary_direction)
+
+        # Maintain only the last 10 cycles
+        if len(last_secondary_directions) > 10:
+            last_secondary_directions.pop(0)
+
 
 
 # WebSocket Manager
