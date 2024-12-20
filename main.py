@@ -204,10 +204,7 @@ def cluster_volatility(volatility, n_clusters=3):
     """
     try:
         # Ensure enough data is available
-        if len(volatility) < 101:
-            logging.warning("Not enough data for clustering. Returning default values.")
-            return [None] * 5
-
+       
         # Use the latest 100 data points for clustering
         window_volatility = volatility[-100:]
 
