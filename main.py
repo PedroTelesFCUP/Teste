@@ -569,8 +569,8 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         return primary_direction, secondary_direction
 
     # Perform clustering to fetch fresh results
-    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
-    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility,  n_clusters=3)
+    primary_centroids, primary_cluster_sizes, primary_assigned_cluster, primary_assigned_centroid, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+    secondary_centroids, secondary_cluster_sizes, secondary_assigned_cluster, secondary_assigned_centroid, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
 
 
                               
