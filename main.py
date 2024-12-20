@@ -200,10 +200,10 @@ def cluster_volatility(volatility, n_clusters=3):
     - n_clusters: Number of clusters (default is 3).
 
     Returns:
-    - centroids: Stabilized centroids of the clusters.
+    - centroids: Stabilized centroids of the clusters as Python floats.
     - cluster_sizes: Sizes of each cluster.
     - assigned_cluster: Cluster index for the most recent volatility value.
-    - assigned_centroid: Centroid value of the assigned cluster.
+    - assigned_centroid: Centroid value of the assigned cluster as a Python float.
     - dominant_cluster: Index of the cluster with the highest size.
     """
     global centroids
@@ -218,9 +218,9 @@ def cluster_volatility(volatility, n_clusters=3):
             # Use the last RECALC_INTERVAL points for recalculating centroids
             window_volatility = volatility[-RECALC_INTERVAL:]
             centroids = [
-                np.percentile(window_volatility, 25),
-                np.percentile(window_volatility, 50),
-                np.percentile(window_volatility, 75)
+                float(np.percentile(window_volatility, 25)),
+                float(np.percentile(window_volatility, 50)),
+                float(np.percentile(window_volatility, 75))
             ]
             logging.info(f"New centroids calculated: {centroids}")
 
@@ -235,7 +235,7 @@ def cluster_volatility(volatility, n_clusters=3):
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
         assigned_cluster = distances.index(min(distances)) + 1  # 1-based index
-        assigned_centroid = centroids[assigned_cluster - 1]
+        assigned_centroid = float(centroids[assigned_cluster - 1])
 
         # Determine the dominant cluster
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
@@ -250,7 +250,7 @@ def cluster_volatility(volatility, n_clusters=3):
 # Calculate ATR
 def calculate_atr(high, low, close, factor=3):
     """
-    Calculate the Average True Range (ATR) with an optional multiplication factor.
+    Calculate the Average True Range (ATR) using Wilder's smoothing method with an optional multiplication factor.
 
     :param high: Series of high prices.
     :param low: Series of low prices.
@@ -270,15 +270,20 @@ def calculate_atr(high, low, close, factor=3):
         tr3 = abs(low - close.shift(1))
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
-        # Calculate ATR with the specified factor
-        atr = tr.rolling(window=ATR_LEN).mean() * factor
+        # Initialize ATR with SMA for the first ATR_LEN periods
+        atr = tr.rolling(window=ATR_LEN).mean()[:ATR_LEN].tolist()
 
-        # Return the latest ATR value if available
-        return atr.iloc[-1] if len(atr.dropna()) > 0 else None
+        # Wilder's method for subsequent ATR values
+        for i in range(ATR_LEN, len(tr)):
+            atr.append(((atr[-1] * (ATR_LEN - 1)) + tr.iloc[i]) / ATR_LEN)
+
+        # Return the latest ATR value multiplied by the factor
+        return atr[-1] * factor if len(atr) > 0 else None
 
     except Exception as e:
         logging.error(f"Error calculating ATR: {e}", exc_info=True)
         return None
+
 
 # Initialize Volatility and Historical Data
 def initialize_historical_data():
