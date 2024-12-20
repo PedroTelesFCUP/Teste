@@ -70,6 +70,7 @@ primary_lower_band = []
 secondary_upper_band = []
 secondary_lower_band = []
 last_secondary_directions = []
+centroids = []
 entry_price = None
 primary_direction = 1  # Default to Bullish
 secondary_direction = 1 # Default to Bullish
