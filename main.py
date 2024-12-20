@@ -194,56 +194,61 @@ def update_dashboard_callback(n):
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
     """
-    Perform clustering on volatility with smoothed centroid updates using the mean of new and existing centroids.
+    Perform K-means clustering on volatility with centroid stabilization.
 
     Parameters:
     - volatility: List of volatility values.
     - n_clusters: Number of clusters (default is 3).
 
     Returns:
-    - centroids: Updated centroids of the clusters.
+    - centroids: Stabilized centroids of the clusters.
     - cluster_sizes: Sizes of each cluster.
     - assigned_cluster: Cluster index for the most recent volatility value.
     - assigned_centroid: Centroid value of the assigned cluster.
     - dominant_cluster: Index of the cluster with the highest size.
     """
-    global centroids
-
     try:
-        # Ensure centroids are initialized
-        if 'centroids' not in globals() or not centroids:
-            centroids = [0.0] * n_clusters  # Default centroids
-
-        # Ensure we have enough data points for clustering
+        # Ensure there are enough data points for clustering
         if len(volatility) < RECALC_INTERVAL:
-            return centroids, [0] * n_clusters, None, None, None
+            return [0.0] * n_clusters, [0] * n_clusters, None, None, None
 
-        # Recalculate centroids every RECALC_INTERVAL data points
-        if len(volatility) % RECALC_INTERVAL == 0:
-            # Use the last RECALC_INTERVAL points for recalculating centroids
-            window_volatility = volatility[-RECALC_INTERVAL:]
+        # Initialize centroids using percentiles
+        window_volatility = volatility[-RECALC_INTERVAL:]
+        centroids = [
+            float(np.percentile(window_volatility, 75)),  # High volatility
+            float(np.percentile(window_volatility, 50)),  # Medium volatility
+            float(np.percentile(window_volatility, 25))   # Low volatility
+        ]
+
+        # Iterative centroid stabilization
+        while True:
+            # Initialize clusters
+            clusters = [[] for _ in range(n_clusters)]
+
+            # Assignment step: Assign points to the nearest centroid
+            for value in window_volatility:
+                distances = [abs(value - c) for c in centroids]
+                nearest_cluster = distances.index(min(distances))
+                clusters[nearest_cluster].append(value)
+
+            # Update step: Calculate new centroids
             new_centroids = [
-                float(np.percentile(window_volatility, 25)),
-                float(np.percentile(window_volatility, 50)),
-                float(np.percentile(window_volatility, 75))
+                np.mean(cluster) if cluster else centroids[i]
+                for i, cluster in enumerate(clusters)
             ]
 
-            # Smooth centroid updates
-            centroids = [
-                float(np.mean([new_centroids[0], centroids[0]])) if centroids else new_centroids[0],
-                float(np.mean([new_centroids[1], centroids[1]])) if centroids else new_centroids[1],
-                float(np.mean([new_centroids[2], centroids[2]])) if centroids else new_centroids[2]
-            ]
-            logging.info(f"Updated centroids: {centroids}")
+            # Convergence check: If centroids stabilize, exit loop
+            if np.allclose(new_centroids, centroids, atol=1e-6):  # Tolerance of 1e-6
+                centroids = new_centroids
+                break
 
-        # Cluster size calculation for the last RECALC_INTERVAL points
-        cluster_sizes = [0] * n_clusters
-        for v in volatility[-RECALC_INTERVAL:]:
-            distances = [abs(v - c) for c in centroids]
-            cluster = distances.index(min(distances))
-            cluster_sizes[cluster] += 1
+            # Update centroids for the next iteration
+            centroids = new_centroids
 
-        # Assign the most recent value to a cluster
+        # Calculate cluster sizes
+        cluster_sizes = [len(cluster) for cluster in clusters]
+
+        # Assign the most recent volatility value to a cluster
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
         assigned_cluster = distances.index(min(distances)) + 1  # 1-based index
