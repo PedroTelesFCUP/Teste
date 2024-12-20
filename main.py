@@ -468,8 +468,8 @@ def heartbeat_logging():
 
     try:
         # Perform clustering for primary and secondary signals
-        primary_centroids, primary_assigned_cluster, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_seed=42)
-        secondary_centroids, secondary_assigned_cluster, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_seed=99)
+        primary_centroids, primary_assigned_cluster, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
+        secondary_centroids, secondary_assigned_cluster, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_state=99)
 
         # Calculate SuperTrend for both signals
         new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
@@ -548,8 +548,8 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         return primary_direction, secondary_direction
 
     # Perform clustering to fetch fresh results
-    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_seed=42)
-    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility,  n_clusters=3, random_seed=99)
+    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
+    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility,  n_clusters=3, random_state=99)
 
 
                               
@@ -834,8 +834,8 @@ def process_signals():
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
                     # Perform clustering separately for primary and secondary volatilities
-                    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_seed=42)
-                    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_seed=99)
+                    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
+                    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_state=99)
 
                     # Execute trading logic
                     primary_direction, secondary_direction = calculate_and_execute(
@@ -861,8 +861,8 @@ if __name__ == "__main__":
     # Initialize historical data
     initialize_historical_data()
     # Perform clustering for both signals
-    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_seed=42)
-    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_seed=99)
+    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
+    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_state=99)
 
 
     # Validate clustering results before proceeding
