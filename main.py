@@ -65,14 +65,22 @@ last_signal_time = 0
 last_heartbeat_time = 0  # Initialize heartbeat time
 last_log_time = 0  # New variable for heartbeat logs
 high, low, close = [], [], []
-upper_band_history = []
-lower_band_history = []
-upper_band_300_history = []  # Stores only the 300-second upper bands
-lower_band_300_history = []  # Stores only the 300-second lower bands
+primary_upper_band = []
+primary_lower_band = []
+secondary_upper_band = []
+secondary_lower_band = []
 last_secondary_directions = []
 entry_price = None
 primary_direction = 1  # Default to Bullish
 secondary_direction = 1 # Default to Bullish
+primary_dominant_cluster = None
+secondary_dominant_cluster = None
+primary_centroids = []
+secondary_centroids = []
+primary_cluster_sizes = []
+secondary_cluster_sizes = []
+buy_signal = {}
+sell_signal = {}
 
 # Flask Server
 app = Flask(__name__)
@@ -131,27 +139,53 @@ dash_app.layout = html.Div([
      Output('metrics-table', 'children')],
     [Input('update-interval', 'n_intervals')]
 )
+@dash_app.callback(
+    [Output('primary-chart', 'figure'),
+     Output('secondary-chart', 'figure'),
+     Output('metrics-table', 'children')],
+    [Input('update-interval', 'n_intervals')]
+)
 def update_dashboard_callback(n):
     try:
-        # Fetch data for dashboard
-        fig_primary, rows = update_dashboard()
-        
-        # Calculate data for secondary signals
+        # Validate necessary variables
+        if len(high) < ATR_LEN or len(low) < ATR_LEN or len(close) < ATR_LEN:
+            raise ValueError("Insufficient data for dashboard update.")
+
+        # Primary Chart
+        fig_primary = go.Figure()
+        fig_primary.add_trace(go.Scatter(y=close[-10:], mode='lines', name='Close Price', line=dict(color='blue')))
+        fig_primary.add_trace(go.Scatter(y=primary_upper_band[-10:], mode='lines', name='Primary Upper Band', line=dict(color='green', dash='dash')))
+        fig_primary.add_trace(go.Scatter(y=primary_lower_band[-10:], mode='lines', name='Primary Lower Band', line=dict(color='red', dash='dash')))
+
+        # Secondary Chart
         fig_secondary = plot_signals_with_markers(
-            high, low, close, secondary_direction, 
-            secondary_upper_band, secondary_lower_band, buy_sell_signals
+            high, low, close, secondary_direction, secondary_upper_band, secondary_lower_band, buy_sell_signals
         )
-        
+
+        # Metrics Table
+        metrics = [
+            ["Price", f"{last_price:.2f}" if last_price else "N/A"],
+            ["Primary Clustering Centroids", ", ".join(f"{x:.2f}" for x in primary_centroids)],
+            ["Primary Cluster Sizes", ", ".join(str(size) for size in primary_cluster_sizes)],
+            ["Primary Dominant Cluster", f"{primary_dominant_cluster}"],
+            ["Secondary Clustering Centroids", ", ".join(f"{x:.2f}" for x in secondary_centroids)],
+            ["Secondary Cluster Sizes", ", ".join(str(size) for size in secondary_cluster_sizes)],
+            ["Secondary Dominant Cluster", f"{secondary_dominant_cluster}"],
+            ["Primary ATR", f"{primary_volatility[-1]:.2f}"],
+            ["Secondary ATR", f"{secondary_volatility[-1]:.2f}"]
+        ]
+        rows = [html.Tr([html.Th(metric[0]), html.Td(metric[1])]) for metric in metrics]
+
         return fig_primary, fig_secondary, rows
 
     except Exception as e:
         logging.error(f"Error updating dashboard: {e}", exc_info=True)
-        # Return empty or placeholder data in case of an error
         return (
             go.Figure().update_layout(title="Primary Chart (Error)", template="plotly_white"),
             go.Figure().update_layout(title="Secondary Chart (Error)", template="plotly_white"),
             [html.Tr([html.Th("Error"), html.Td("An error occurred while updating the dashboard.")])]
         )
+
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
