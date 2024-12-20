@@ -385,27 +385,25 @@ def heartbeat_logging():
     Logs current status and data every 30 seconds for monitoring purposes.
     Updates band history to ensure data is current.
     """
-    global primary_direction, secondary_direction  # Add global declarations
+    global primary_direction, secondary_direction
     if not volatility or len(volatility) < 3:
         logging.info("Heartbeat: Insufficient data for detailed logging.")
         return
 
     try:
-        # Perform clustering
-        centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster = cluster_volatility(volatility)
-        if assigned_centroid is None:
-            logging.info("Heartbeat: Clustering not available.")
-            return
+        # Perform clustering for primary and secondary signals
+        primary_centroids, primary_assigned_cluster, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
+        secondary_centroids, secondary_assigned_cluster, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
-        # Calculate ATR and SuperTrend for both signals
+        # Calculate SuperTrend for both signals
         new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
-            pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
+            pd.Series(high), pd.Series(low), pd.Series(close), primary_assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
         )
         new_secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
-            pd.Series(high), pd.Series(low), pd.Series(close), assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
+            pd.Series(high), pd.Series(low), pd.Series(close), secondary_assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
         )
 
-        # Update global directions
+        # Update directions globally
         primary_direction = new_primary_direction
         secondary_direction = new_secondary_direction
 
@@ -413,43 +411,30 @@ def heartbeat_logging():
         stop_loss = None
         take_profit = None
         if entry_price is not None:
-            stop_loss = secondary_lower_band.iloc[-1]  # Lower band of the secondary signal
-            take_profit = stop_loss * 1.5  # Take-profit is 1.5 times the lower band value
+            stop_loss = secondary_lower_band.iloc[-1]
+            take_profit = stop_loss * 1.5
 
-        # Update band history
-        if len(primary_upper_band) > 0 and len(primary_lower_band) > 0:
-            upper_band_history.append(float(primary_upper_band.iloc[-1]))
-            lower_band_history.append(float(primary_lower_band.iloc[-1]))
-            if len(upper_band_history) > 4:
-                upper_band_history.pop(0)
-            if len(lower_band_history) > 4:
-                lower_band_history.pop(0)
-
-        # Stop-Loss and Take-Profit Display
-        stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
-        take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
-
+        # Log Heartbeat Information
         logging.info(
-            f"\n=== Combined Logging ===\n"
+            f"\n=== Heartbeat Logging ===\n"
             f"Price: {last_price:.2f}\n"
-            f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
+            f"Primary Cluster Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
+            f"Primary Cluster Sizes: {', '.join(str(size) for size in primary_cluster_sizes)}\n"
             f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
-            f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
+            f"Secondary Cluster Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
+            f"Secondary Cluster Sizes: {', '.join(str(size) for size in secondary_cluster_sizes)}\n"
             f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
-            f"Cluster Sizes (Primary): {', '.join(str(size) for size in cluster_sizes)}\n"
-            f"Primary ATR (Current): {atr_primary.iloc[-1]:.2f}\n"
-            f"Secondary ATR (Current): {atr_secondary.iloc[-1]:.2f}\n"
             f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
             f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
             f"Entry Price: {entry_price if entry_price else 'None'}\n"
-            f"Stop Loss: {stop_loss_display}\n"
-            f"Take Profit: {take_profit_display}\n"
-            f"Primary Upper Band (Current): {primary_upper_band.iloc[-1]:.2f}\n"
-            f"Primary Lower Band (Current): {primary_lower_band.iloc[-1]:.2f}\n"
-            f"Secondary Upper Band (Current): {secondary_upper_band.iloc[-1]:.2f}\n"
-            f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
+            f"Stop Loss: {stop_loss if stop_loss else 'None'}\n"
+            f"Take Profit: {take_profit if take_profit else 'None'}\n"
             f"=========================="
         )
+
+    except Exception as e:
+        logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
+
 
 
     except Exception as e:
@@ -469,8 +454,9 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     global entry_price # Ensure this global variable is properly used
 
     # Perform clustering separately for primary and secondary signals
-    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
-    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
+    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+
 
 
 
@@ -522,7 +508,8 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
         f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
         f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
         f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
-        f"Cluster Sizes (Primary): {', '.join(str(size) for size in cluster_sizes)}\n"
+        f"Cluster Sizes (Primary): {', '.join(str(size) for size in primary_cluster_sizes)}\n"
+        f"Cluster Sizes (Secondary): {', '.join(str(size) for size in secondary_cluster_sizes)}\n"
         f"Primary ATR (Current): {atr_primary.iloc[-1]:.2f}\n"
         f"Secondary ATR (Current): {atr_secondary.iloc[-1]:.2f}\n"
         f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
