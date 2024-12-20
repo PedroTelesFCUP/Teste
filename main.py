@@ -193,29 +193,31 @@ def cluster_volatility(volatility, n_clusters=3):
     Perform K-Means clustering on volatility data.
     """
     try:
+        # Validate input data length
         if len(volatility) < n_clusters:
-            logging.warning("Not enough data for clustering. Returning None values.")
+            logging.error(f"Insufficient data for clustering. Volatility length: {len(volatility)}")
             return None, None, None, None, None
 
-        # Perform K-Means clustering
+        # Prepare data for clustering
         volatility = np.array(volatility).reshape(-1, 1)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
+        # Extract results
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
-
         latest_volatility = volatility[-1][0]
         assigned_cluster = kmeans.predict([[latest_volatility]])[0] + 1
         assigned_centroid = centroids[assigned_cluster - 1]
-
         dominant_cluster = np.argmax(cluster_sizes) + 1
 
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
+
     except Exception as e:
-        logging.error(f"Error in clustering: {e}", exc_info=True)
+        logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
         return None, None, None, None, None
+
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=1):
@@ -802,13 +804,17 @@ def process_signals():
                     # Perform clustering separately for primary and secondary volatilities
                     primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
                     secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+                # Validate clustering outputs
+                if primary_dominant_cluster is None or secondary_dominant_cluster is None:
+                    logging.error("Clustering failed. Skipping signal processing.")
+                return
 
-                    # Execute trading logic
-                    primary_direction, secondary_direction = calculate_and_execute(
-                        last_price, primary_direction, secondary_direction, 
-                        primary_cluster_sizes, secondary_cluster_sizes, 
-                        primary_dominant_cluster, secondary_dominant_cluster
-                    )
+                # Execute trading logic
+                primary_direction, secondary_direction = calculate_and_execute(
+                    last_price, primary_direction, secondary_direction, 
+                    primary_cluster_sizes, secondary_cluster_sizes, 
+                    primary_dominant_cluster, secondary_dominant_cluster
+                )
                 last_signal_time = current_time  # Update the last signal time
 
             # Heartbeat logging every 30 seconds
