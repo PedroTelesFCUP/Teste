@@ -453,20 +453,25 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     """
     global entry_price # Ensure this global variable is properly used
 
-    # Perform clustering separately for primary and secondary signals
-    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
-    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+    # Ensure ATR values are available
+    if not primary_volatility or not secondary_volatility:
+        logging.error("ATR values are missing.")
+        return primary_direction, secondary_direction
 
+    # Perform clustering for primary and secondary signals
+    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
+    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
-
-
-    # Calculate ATR and SuperTrend for primary and secondary signals
+    # Calculate SuperTrend
     new_primary_direction, _, _ = calculate_supertrend_with_clusters(
         high, low, close, primary_assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
     )
     new_secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
         high, low, close, secondary_assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
     )
+
+    # Trading logic remains the same...
+
 
     # Handle Stop-Loss and Take-Profit Logic
     stop_loss = None
@@ -510,8 +515,8 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
         f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
         f"Cluster Sizes (Primary): {', '.join(str(size) for size in primary_cluster_sizes)}\n"
         f"Cluster Sizes (Secondary): {', '.join(str(size) for size in secondary_cluster_sizes)}\n"
-        f"Primary ATR (Current): {primary_atr.iloc[-1]:.2f}\n"
-        f"Secondary ATR (Current): {secondary_atr.iloc[-1]:.2f}\n"
+        f"Primary ATR (Current): {primary_volatility[-1]:.2f}\n"
+        f"Secondary ATR (Current): {secondary_volatility[-1]:.2f}\n"
         f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
         f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
         f"Entry Price: {entry_price if entry_price else 'None'}\n"
