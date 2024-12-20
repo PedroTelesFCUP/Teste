@@ -223,7 +223,7 @@ def cluster_volatility(volatility, n_clusters=3):
                 clusters[cluster].append(atr)
 
             centroids = [np.mean(clusters[i]) if clusters[i] else centroids[i] for i in range(n_clusters)]
-            logging.info(f"Iteration {iteration + 1}: Centroids = {centroids}")
+        #    logging.info(f"Iteration {iteration + 1}: Centroids = {centroids}")
 
         # Assign cluster to the latest volatility value
         latest_volatility = volatility[-1]
