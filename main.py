@@ -394,29 +394,41 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, atr_
 
 
 # Execute Trades
-def execute_trade(symbol, quantity, side):
+def execute_trade(symbol, quantity, take_profit, stop_loss, side):
     """
     Executes a trade order with Alpaca and handles errors.
-    
+
     :param symbol: The trading symbol (e.g., BTC/USD).
     :param quantity: The quantity to trade.
+    :param take_profit: The take-profit price.
+    :param stop_loss: The stop-loss price.
     :param side: The side of the trade ("buy" or "sell").
     """
     try:
         logging.info(f"Attempting to {side} {quantity} units of {symbol}.")
-        
+
+        # Prepare optional parameters for stop-loss and take-profit
+        order_params = {
+            "symbol": symbol,
+            "qty": quantity,
+            "side": side,
+            "type": "market",
+            "time_in_force": "gtc",
+        }
+
+        if stop_loss:
+            order_params["order_class"] = "bracket"
+            order_params["stop_loss"] = {"stop_price": stop_loss}
+
+        if take_profit:
+            order_params["take_profit"] = {"limit_price": take_profit}
+
         # Submit the order to Alpaca
-        order = alpaca_api.submit_order(
-            symbol=symbol,
-            qty=quantity,
-            side=side,
-            type="market",
-            time_in_force="gtc"
-        )
-        
+        order = alpaca_api.submit_order(**order_params)
+
         # Confirm order status
         logging.info(f"{side.capitalize()} order submitted successfully. Order ID: {order.id}")
-        
+
         # Retrieve and log order details
         order_details = alpaca_api.get_order(order.id)
         logging.info(
@@ -428,10 +440,14 @@ def execute_trade(symbol, quantity, side):
             f"Status: {order_details.status}\n"
             f"Submitted At: {order_details.submitted_at}"
         )
-        
+
         # Handle partial fills
         if order_details.status not in ["filled", "partially_filled"]:
             logging.warning(f"Order status: {order_details.status}. Please check manually.")
+
+    except Exception as e:
+        logging.error(f"Error executing {side} order for {symbol}: {e}", exc_info=True)
+
     
     except Exception as e:
         logging.error(f"Error executing {side} order for {symbol}: {e}", exc_info=True)
@@ -580,40 +596,54 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     # Buy signal
     buy_signal = (
         primary_direction == 1 and  # Primary signal is bullish
-        (
-            bearish_bullish_bearish or bullish_bearish_bullish
-        ) and
+        bullish_bearish_bullish and
         primary_dominant_cluster == 3 and  # High volatility for primary
         secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary in relaxed mode
         entry_price is None  # No active trade
     )
     if buy_signal:
-        execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
-        entry_price = price
-        logging.info(
-            f"Buy signal triggered. Entry price: {price:.2f}, "
-            f"Stop-Loss: {secondary_lower_band.iloc[-1]:.2f}, "
-            f"Take-Profit: {take_profit:.2f}" if take_profit else "None"
-        )
+        # Calculate stop-loss and take-profit
+        stop_loss = secondary_lower_band.iloc[-1] if secondary_lower_band is not None else None
+        take_profit = stop_loss * 1.5 if stop_loss else None
+
+        if stop_loss is None or take_profit is None:
+            logging.error("Missing stop-loss or take-profit. Skipping buy trade.")
+        else:
+            try:
+                execute_trade(ALPACA_SYMBOL, QUANTITY, "buy", stop_loss=stop_loss, take_profit=take_profit)
+                entry_price = price  # Record entry price
+                logging.info(
+                    f"Buy signal triggered. Entry price: {price:.2f}, "
+                    f"Stop-Loss: {stop_loss:.2f}, Take-Profit: {take_profit:.2f}"
+                )
+            except Exception as e:
+                logging.error(f"Error executing buy trade: {e}")
 
     # Sell signal
     sell_signal = (
         primary_direction == -1 and  # Primary signal is bearish
-        (
-            bearish_bullish_bearish or bullish_bearish_bullish
-        ) and
+        bearish_bullish_bearish and
         primary_dominant_cluster == 3 and  # High volatility for primary
         secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary in relaxed mode
         entry_price is None  # No active trade
     )
     if sell_signal:
-        execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-        entry_price = price
-        logging.info(
-            f"Sell signal triggered. Entry price: {price:.2f}, "
-            f"Stop-Loss: {secondary_upper_band.iloc[-1]:.2f}, "
-            f"Take-Profit: {take_profit:.2f}" if take_profit else "None"
-        )
+        # Calculate stop-loss and take-profit
+        stop_loss = secondary_upper_band.iloc[-1] if secondary_upper_band is not None else None
+        take_profit = stop_loss * 1.5 if stop_loss else None
+
+        if stop_loss is None or take_profit is None:
+            logging.error("Missing stop-loss or take-profit. Skipping sell trade.")
+        else:
+            try:
+                execute_trade(ALPACA_SYMBOL, QUANTITY, "sell", stop_loss=stop_loss, take_profit=take_profit)
+                entry_price = price  # Record entry price
+                logging.info(
+                    f"Sell signal triggered. Entry price: {price:.2f}, "
+                    f"Stop-Loss: {stop_loss:.2f}, Take-Profit: {take_profit:.2f}"
+                )
+            except Exception as e:
+                logging.error(f"Error executing sell trade: {e}")
     # Logging
     stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
     take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
