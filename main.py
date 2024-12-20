@@ -188,14 +188,13 @@ def update_dashboard_callback(n):
 
 
 # Perform K-Means Clustering on volatility
-def cluster_volatility(volatility, n_clusters=3, random_state=None):
+def cluster_volatility(volatility, n_clusters=3):
     """
-    Perform K-Means clustering on volatility data with adaptive adjustments based on percentiles.
+    Perform percentile-based clustering on volatility data with iterative adjustments.
 
     Parameters:
     - volatility: List of volatility values.
-    - n_clusters: Number of clusters for K-Means (default: 3).
-    - random_state: Random seed for K-Means clustering.
+    - n_clusters: Number of clusters (default: 3).
 
     Returns:
     - centroids: Centroids of the clusters (dynamically adjusted).
@@ -209,44 +208,43 @@ def cluster_volatility(volatility, n_clusters=3, random_state=None):
             logging.warning("Not enough data for clustering. Returning default values.")
             return [None] * 5
 
-        # Convert volatility to a NumPy array for K-Means
-        volatility_array = np.array(volatility).reshape(-1, 1)
-
-        # Perform K-Means clustering
-        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
-        kmeans.fit(volatility_array)
-
-        # Extract centroids and cluster labels
-        centroids = kmeans.cluster_centers_.flatten()
-        labels = kmeans.labels_
-
-        # Calculate percentiles
+        # Initialize centroids using percentiles
         low_volatility = np.percentile(volatility, 25)
         medium_volatility = np.percentile(volatility, 50)
         high_volatility = np.percentile(volatility, 75)
+        centroids = [low_volatility, medium_volatility, high_volatility]
 
-        # Dynamically adjust centroids
-        centroids[0] = (centroids[0] + low_volatility) / 2
-        centroids[1] = (centroids[1] + medium_volatility) / 2
-        centroids[2] = (centroids[2] + high_volatility) / 2
+        # Iterative adjustment for 100 iterations
+        max_iterations = 100
+        for iteration in range(max_iterations):
+            clusters = {i: [] for i in range(n_clusters)}
+            for atr in volatility:
+                distances = [abs(atr - c) for c in centroids]
+                cluster = distances.index(min(distances))
+                clusters[cluster].append(atr)
 
-        # Count cluster sizes
-        cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
+            centroids = [np.mean(clusters[i]) if clusters[i] else centroids[i] for i in range(n_clusters)]
+            logging.info(f"Iteration {iteration + 1}: Centroids = {centroids}")
 
-        # Determine assigned cluster for the latest volatility value
+        # Assign cluster to the latest volatility value
         latest_volatility = volatility[-1]
-        assigned_cluster = labels[-1] + 1  # Adjust index to match 1-based (1 = Low, 2 = Medium, 3 = High)
-        assigned_centroid = centroids[labels[-1]]
+        distances = [abs(latest_volatility - c) for c in centroids]
+        assigned_cluster = distances.index(min(distances)) + 1  # 1-based index
+        assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Determine dominant cluster (largest size)
-        dominant_cluster = np.argmax(cluster_sizes) + 1
+        # Determine cluster sizes
+        cluster_sizes = [len(clusters[i]) for i in range(n_clusters)]
 
-        # Return the results in the same format as before
+        # Find dominant cluster
+        dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
+
+        # Return values in the original format
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
 
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
         return [None] * 5
+
 
 
 
@@ -468,8 +466,8 @@ def heartbeat_logging():
 
     try:
         # Perform clustering for primary and secondary signals
-        primary_centroids, primary_assigned_cluster, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
-        secondary_centroids, secondary_assigned_cluster, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_state=99)
+        primary_centroids, primary_assigned_cluster, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+        secondary_centroids, secondary_assigned_cluster, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
 
         # Calculate SuperTrend for both signals
         new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
@@ -548,8 +546,8 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         return primary_direction, secondary_direction
 
     # Perform clustering to fetch fresh results
-    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
-    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility,  n_clusters=3, random_state=99)
+    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility,  n_clusters=3)
 
 
                               
@@ -834,8 +832,8 @@ def process_signals():
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
                     # Perform clustering separately for primary and secondary volatilities
-                    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
-                    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_state=99)
+                    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+                    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
 
                     # Execute trading logic
                     primary_direction, secondary_direction = calculate_and_execute(
@@ -861,8 +859,8 @@ if __name__ == "__main__":
     # Initialize historical data
     initialize_historical_data()
     # Perform clustering for both signals
-    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3, random_state=42)
-    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3, random_state=99)
+    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
 
 
     # Validate clustering results before proceeding
