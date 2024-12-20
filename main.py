@@ -191,41 +191,31 @@ def update_dashboard_callback(n):
 def cluster_volatility(volatility, n_clusters=3):
     """
     Perform K-Means clustering on volatility data.
-
-    :param volatility: List of volatility values.
-    :param n_clusters: Number of clusters to create.
-    :return: Centroids, assigned cluster, assigned centroid, cluster sizes, and dominant cluster.
     """
     try:
-        # Input validation
         if len(volatility) < n_clusters:
+            logging.warning("Not enough data for clustering. Returning None values.")
             return None, None, None, None, None
 
-        # Prepare data for clustering
-        volatility = np.array(volatility).reshape(-1, 1)
-
         # Perform K-Means clustering
+        volatility = np.array(volatility).reshape(-1, 1)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
-        # Extract clustering results
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
 
-        # Identify the cluster of the latest volatility value
         latest_volatility = volatility[-1][0]
-        assigned_cluster = kmeans.predict([[latest_volatility]])[0]+1
-        assigned_centroid = centroids[assigned_cluster]
+        assigned_cluster = kmeans.predict([[latest_volatility]])[0] + 1
+        assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Find the dominant cluster
-        dominant_cluster = np.argmax(cluster_sizes)+1  # Cluster with the largest size
+        dominant_cluster = np.argmax(cluster_sizes) + 1
 
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
-
-    except Exception:
+    except Exception as e:
+        logging.error(f"Error in clustering: {e}", exc_info=True)
         return None, None, None, None, None
-
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=1):
@@ -540,6 +530,10 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
     secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
+    if primary_centroids is None or secondary_centroids is None:
+    logging.warning("Skipping signal processing due to missing cluster data.")
+    return primary_direction, secondary_direction
+                              
     # Calculate SuperTrend
     new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
         high, low, close, primary_volatility[-1], PRIMARY_ATR_FACTOR, primary_direction
@@ -585,8 +579,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     buy_signal = (
         primary_direction == 1 and  # Primary signal is bullish
         (
-            bearish_bullish_bearish or bullish_bearish_bullish or  # Strict patterns
-            relaxed_mode  # Relaxed mode
+            bearish_bullish_bearish or bullish_bearish_bullish
         ) and
         primary_dominant_cluster == 3 and  # High volatility for primary
         secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary in relaxed mode
@@ -595,14 +588,17 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     if buy_signal:
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
         entry_price = price
-        logging.info(f"Buy signal triggered. Entry price: {price:.2f}, Stop-Loss: {secondary_lower_band.iloc[-1]:.2f}, Take-Profit: {take_profit:.2f}")
+        logging.info(
+            f"Buy signal triggered. Entry price: {price:.2f}, "
+            f"Stop-Loss: {secondary_lower_band.iloc[-1]:.2f}, "
+            f"Take-Profit: {take_profit:.2f}" if take_profit else "None"
+        )
 
     # Sell signal
     sell_signal = (
         primary_direction == -1 and  # Primary signal is bearish
         (
-            bearish_bullish_bearish or bullish_bearish_bullish or  # Strict patterns
-            relaxed_mode  # Relaxed mode
+            bearish_bullish_bearish or bullish_bearish_bullish
         ) and
         primary_dominant_cluster == 3 and  # High volatility for primary
         secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary in relaxed mode
@@ -611,8 +607,11 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     if sell_signal:
         execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
         entry_price = price
-        logging.info(f"Sell signal triggered. Entry price: {price:.2f}, Stop-Loss: {secondary_upper_band.iloc[-1]:.2f}, Take-Profit: {take_profit:.2f}")
-
+        logging.info(
+            f"Sell signal triggered. Entry price: {price:.2f}, "
+            f"Stop-Loss: {secondary_upper_band.iloc[-1]:.2f}, "
+            f"Take-Profit: {take_profit:.2f}" if take_profit else "None"
+        )
     # Logging
     stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
     take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
