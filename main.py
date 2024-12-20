@@ -483,6 +483,20 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         high, low, close, secondary_volatility[-1], SECONDARY_ATR_FACTOR, secondary_direction
     )
 
+    # Check for specific transition patterns in secondary signal
+    bearish_bullish_bearish = (
+        last_secondary_directions[-3:] == [-1, 1, -1]  # Bearish → Bullish → Bearish
+    )
+    bullish_bearish_bullish = (
+        last_secondary_directions[-3:] == [1, -1, 1]  # Bullish → Bearish → Bullish
+    )
+
+    # Relaxed mode: At least two bearish or bullish signals in the last 10 cycles
+    relaxed_mode = (
+        last_secondary_directions.count(-1) > 1 or
+        last_secondary_directions.count(1) > 1
+    )
+
     # Handle Stop-Loss and Take-Profit Logic
     stop_loss = None
     take_profit = None
@@ -502,12 +516,15 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
             logging.info(f"Take-profit triggered. Exiting trade. Price: {price:.2f}, Profit/Loss: {profit_loss:.2f}")
             entry_price = None  # Reset entry price
 
-    # Execute Buy Signal if conditions are met
+    # Buy signal
     buy_signal = (
-        primary_dominant_cluster == 3 and  # Primary clustering shows high volatility
         primary_direction == 1 and  # Primary signal is bullish
-        secondary_direction == 1 and  # Secondary signal is bullish
-        secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary
+        (
+            bearish_bullish_bearish or bullish_bearish_bullish or  # Strict patterns
+            relaxed_mode  # Relaxed mode
+        ) and
+        primary_dominant_cluster == 3 and  # High volatility for primary
+        secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary in relaxed mode
         entry_price is None  # No active trade
     )
     if buy_signal:
@@ -515,12 +532,15 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         entry_price = price
         logging.info(f"Buy signal triggered. Entry price: {price:.2f}, Stop-Loss: {secondary_lower_band.iloc[-1]:.2f}, Take-Profit: {take_profit:.2f}")
 
-    # Execute Sell Signal if conditions are met
+    # Sell signal
     sell_signal = (
-        primary_dominant_cluster == 3 and  # Primary clustering shows high volatility
         primary_direction == -1 and  # Primary signal is bearish
-        secondary_direction == -1 and  # Secondary signal is bearish
-        secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary
+        (
+            bearish_bullish_bearish or bullish_bearish_bullish or  # Strict patterns
+            relaxed_mode  # Relaxed mode
+        ) and
+        primary_dominant_cluster == 3 and  # High volatility for primary
+        secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary in relaxed mode
         entry_price is None  # No active trade
     )
     if sell_signal:
@@ -555,6 +575,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     )
 
     return new_primary_direction, new_secondary_direction
+
 
 
 # Update dash
