@@ -449,36 +449,35 @@ def heartbeat_logging():
 
 
 # Signal Processing
-def calculate_and_execute(price, primary_direction, secondary_direction):
+def calculate_and_execute(price, primary_direction, secondary_direction, 
+                          primary_cluster_sizes, secondary_cluster_sizes, 
+                          primary_dominant_cluster, secondary_dominant_cluster):
     """
     Process trading signals and execute trades based on price and direction logic.
 
     :param price: Current price.
     :param primary_direction: Current direction of the primary signal.
     :param secondary_direction: Current direction of the secondary signal.
+    :param primary_cluster_sizes: Sizes of the primary clusters.
+    :param secondary_cluster_sizes: Sizes of the secondary clusters.
+    :param primary_dominant_cluster: Dominant cluster for the primary signal.
+    :param secondary_dominant_cluster: Dominant cluster for the secondary signal.
     :return: Updated primary_direction and secondary_direction.
     """
-    global entry_price # Ensure this global variable is properly used
+    global entry_price  # Ensure this global variable is properly used
 
     # Ensure ATR values are available
     if not primary_volatility or not secondary_volatility:
         logging.error("ATR values are missing.")
         return primary_direction, secondary_direction
 
-    # Perform clustering for primary and secondary signals
-    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
-    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
-
     # Calculate SuperTrend
     new_primary_direction, _, _ = calculate_supertrend_with_clusters(
-        high, low, close, primary_assigned_centroid, PRIMARY_ATR_FACTOR, primary_direction
+        high, low, close, primary_volatility[-1], PRIMARY_ATR_FACTOR, primary_direction
     )
     new_secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
-        high, low, close, secondary_assigned_centroid, SECONDARY_ATR_FACTOR, secondary_direction
+        high, low, close, secondary_volatility[-1], SECONDARY_ATR_FACTOR, secondary_direction
     )
-
-    # Trading logic remains the same...
-
 
     # Handle Stop-Loss and Take-Profit Logic
     stop_loss = None
@@ -515,13 +514,13 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
     logging.info(
         f"\n=== Combined Logging ===\n"
-        f"Price: {last_price:.2f}\n"
-        f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
+        f"Price: {price:.2f}\n"
+        f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_cluster_sizes)}\n"
+        f"Primary Cluster Sizes: {', '.join(str(size) for size in primary_cluster_sizes)}\n"
         f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
-        f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
+        f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_cluster_sizes)}\n"
+        f"Secondary Cluster Sizes: {', '.join(str(size) for size in secondary_cluster_sizes)}\n"
         f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
-        f"Cluster Sizes (Primary): {', '.join(str(size) for size in primary_cluster_sizes)}\n"
-        f"Cluster Sizes (Secondary): {', '.join(str(size) for size in secondary_cluster_sizes)}\n"
         f"Primary ATR (Current): {primary_volatility[-1]:.2f}\n"
         f"Secondary ATR (Current): {secondary_volatility[-1]:.2f}\n"
         f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
@@ -529,13 +528,8 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
         f"Entry Price: {entry_price if entry_price else 'None'}\n"
         f"Stop Loss: {stop_loss_display}\n"
         f"Take Profit: {take_profit_display}\n"
-        f"Primary Upper Band (Current): {primary_upper_band.iloc[-1]:.2f}\n"
-        f"Primary Lower Band (Current): {primary_lower_band.iloc[-1]:.2f}\n"
-        f"Secondary Upper Band (Current): {secondary_upper_band.iloc[-1]:.2f}\n"
-        f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
         f"=========================="
     )
-
 
     return new_primary_direction, new_secondary_direction
 
@@ -639,12 +633,14 @@ def process_signals():
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
                     # Perform clustering separately for primary and secondary volatilities
-                    primary_centroids, _, primary_assigned_centroid, _, primary_dominant_cluster = cluster_volatility(primary_volatility)
-                    secondary_centroids, _, secondary_assigned_centroid, _, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+                    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
+                    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
                     # Execute trading logic
                     primary_direction, secondary_direction = calculate_and_execute(
-                        last_price, primary_direction, secondary_direction
+                        last_price, primary_direction, secondary_direction, 
+                        primary_cluster_sizes, secondary_cluster_sizes, 
+                        primary_dominant_cluster, secondary_dominant_cluster
                     )
                 last_signal_time = current_time  # Update the last signal time
 
