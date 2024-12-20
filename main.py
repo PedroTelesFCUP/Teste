@@ -193,6 +193,20 @@ def update_dashboard_callback(n):
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
+    """
+    Perform K-means clustering on volatility with centroid stabilization.
+
+    Parameters:
+    - volatility: List of volatility values.
+    - n_clusters: Number of clusters (default is 3).
+
+    Returns:
+    - centroids: Stabilized centroids of the clusters (list of floats).
+    - cluster_sizes: Sizes of each cluster (list of integers).
+    - assigned_cluster: Cluster index for the most recent volatility value.
+    - assigned_centroid: Centroid value of the assigned cluster.
+    - dominant_cluster: Index of the cluster with the highest size.
+    """
     try:
         # Ensure there are enough data points for clustering
         if len(volatility) < RECALC_INTERVAL:
@@ -227,13 +241,16 @@ def cluster_volatility(volatility, n_clusters=3):
 
         # Ensure cluster sizes are integers
         cluster_sizes = [len(cluster) for cluster in clusters]
-        cluster_sizes = list(map(int, cluster_sizes))
+        cluster_sizes = list(map(int, cluster_sizes))  # Explicitly enforce integer type
 
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
         assigned_cluster = distances.index(min(distances)) + 1
         assigned_centroid = centroids[assigned_cluster - 1]
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
+
+        # Log outputs for debugging
+        logging.debug(f"Cluster Sizes: {cluster_sizes}, Centroids: {centroids}")
 
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
 
@@ -566,6 +583,13 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         last_secondary_directions.count(-1) > 1 or
         last_secondary_directions.count(1) > 1
     )
+    # Validate cluster sizes
+    if not isinstance(primary_cluster_sizes, list):
+        logging.error(f"Primary cluster sizes is not a list: {primary_cluster_sizes} (type: {type(primary_cluster_sizes)})")
+        primary_cluster_sizes = [0] * 3  # Fallback to default values
+    if not isinstance(secondary_cluster_sizes, list):
+        logging.error(f"Secondary cluster sizes is not a list: {secondary_cluster_sizes} (type: {type(secondary_cluster_sizes)})")
+        secondary_cluster_sizes = [0] * 3  # Fallback to default values
 
     # Handle Stop-Loss and Take-Profit Logic
     stop_loss = None
@@ -823,6 +847,10 @@ def process_signals():
 
         try:
             # Signal processing every SIGNAL_INTERVAL seconds
+            if not isinstance(primary_cluster_sizes, list) or not isinstance(secondary_cluster_sizes, list):
+                logging.error("Invalid cluster sizes detected. Skipping signal processing.")
+            return
+
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
                     # Perform clustering separately for primary and secondary volatilities
