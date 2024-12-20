@@ -202,7 +202,7 @@ def cluster_volatility(volatility, n_clusters=3):
 
     Returns:
     - centroids: Stabilized centroids of the clusters.
-    - cluster_sizes: Sizes of each cluster.
+    - cluster_sizes: Sizes of each cluster (list).
     - assigned_cluster: Cluster index for the most recent volatility value.
     - assigned_centroid: Centroid value of the assigned cluster.
     - dominant_cluster: Index of the cluster with the highest size.
@@ -233,7 +233,7 @@ def cluster_volatility(volatility, n_clusters=3):
 
             # Update step: Calculate new centroids
             new_centroids = [
-                float(np.mean(cluster)) if cluster else centroids[i]
+                np.mean(cluster) if cluster else centroids[i]
                 for i, cluster in enumerate(clusters)
             ]
 
@@ -257,12 +257,12 @@ def cluster_volatility(volatility, n_clusters=3):
         # Determine the dominant cluster
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
 
-        # Return all outputs, ensuring centroids are Python floats
-        return list(map(float, centroids)), cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
+        return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
 
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
-        return [None] * 5
+        return [None] * n_clusters, [0] * n_clusters, None, None, None
+
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=3):
