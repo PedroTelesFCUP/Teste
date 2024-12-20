@@ -471,6 +471,10 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         logging.error("ATR values are missing.")
         return primary_direction, secondary_direction
 
+    # Perform clustering to fetch fresh results
+    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
+    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
+
     # Calculate SuperTrend
     new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
         high, low, close, primary_volatility[-1], PRIMARY_ATR_FACTOR, primary_direction
@@ -487,13 +491,15 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         take_profit = stop_loss * 1.5
 
         if price <= stop_loss:
+            profit_loss = price - entry_price
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-            logging.info(f"Stop-loss triggered. Exiting trade. Price: {price:.2f}")
+            logging.info(f"Stop-loss triggered. Exiting trade. Price: {price:.2f}, Profit/Loss: {profit_loss:.2f}")
             entry_price = None  # Reset entry price
 
         elif price >= take_profit:
+            profit_loss = price - entry_price
             execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
-            logging.info(f"Take-profit triggered. Exiting trade. Price: {price:.2f}")
+            logging.info(f"Take-profit triggered. Exiting trade. Price: {price:.2f}, Profit/Loss: {profit_loss:.2f}")
             entry_price = None  # Reset entry price
 
     # Execute Buy Signal if conditions are met
@@ -501,13 +507,26 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         primary_dominant_cluster == 3 and  # Primary clustering shows high volatility
         primary_direction == 1 and  # Primary signal is bullish
         secondary_direction == 1 and  # Secondary signal is bullish
-        secondary_dominant_cluster == 3 and  # Secondary clustering shows high volatility
+        secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary
         entry_price is None  # No active trade
     )
     if buy_signal:
         execute_trade(ALPACA_SYMBOL, QUANTITY, "buy")
         entry_price = price
-        logging.info(f"Buy signal triggered. Entry price: {price:.2f}")
+        logging.info(f"Buy signal triggered. Entry price: {price:.2f}, Stop-Loss: {secondary_lower_band.iloc[-1]:.2f}, Take-Profit: {take_profit:.2f}")
+
+    # Execute Sell Signal if conditions are met
+    sell_signal = (
+        primary_dominant_cluster == 3 and  # Primary clustering shows high volatility
+        primary_direction == -1 and  # Primary signal is bearish
+        secondary_direction == -1 and  # Secondary signal is bearish
+        secondary_dominant_cluster in [2, 3] and  # Medium or high volatility for secondary
+        entry_price is None  # No active trade
+    )
+    if sell_signal:
+        execute_trade(ALPACA_SYMBOL, QUANTITY, "sell")
+        entry_price = price
+        logging.info(f"Sell signal triggered. Entry price: {price:.2f}, Stop-Loss: {secondary_upper_band.iloc[-1]:.2f}, Take-Profit: {take_profit:.2f}")
 
     # Logging
     stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
@@ -515,10 +534,10 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     logging.info(
         f"\n=== Combined Logging ===\n"
         f"Price: {price:.2f}\n"
-        f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_cluster_sizes)}\n"
+        f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
         f"Primary Cluster Sizes: {', '.join(str(size) for size in primary_cluster_sizes)}\n"
         f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
-        f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_cluster_sizes)}\n"
+        f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
         f"Secondary Cluster Sizes: {', '.join(str(size) for size in secondary_cluster_sizes)}\n"
         f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
         f"Primary ATR (Current): {primary_volatility[-1]:.2f}\n"
@@ -536,7 +555,6 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     )
 
     return new_primary_direction, new_secondary_direction
-
 
 
 # Update dash
