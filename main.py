@@ -251,7 +251,7 @@ def cluster_volatility(volatility, n_clusters=3, random_state=None):
 
 
 # Calculate ATR
-def calculate_atr(high, low, close, factor=1):
+def calculate_atr(high, low, close, factor=3):
     """
     Calculate the Average True Range (ATR) with an optional multiplication factor.
 
