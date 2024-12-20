@@ -193,20 +193,6 @@ def update_dashboard_callback(n):
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
-    """
-    Perform K-means clustering on volatility with centroid stabilization.
-
-    Parameters:
-    - volatility: List of volatility values.
-    - n_clusters: Number of clusters (default is 3).
-
-    Returns:
-    - centroids: Stabilized centroids of the clusters.
-    - cluster_sizes: Sizes of each cluster (list).
-    - assigned_cluster: Cluster index for the most recent volatility value.
-    - assigned_centroid: Centroid value of the assigned cluster.
-    - dominant_cluster: Index of the cluster with the highest size.
-    """
     try:
         # Ensure there are enough data points for clustering
         if len(volatility) < RECALC_INTERVAL:
@@ -222,39 +208,31 @@ def cluster_volatility(volatility, n_clusters=3):
 
         # Iterative centroid stabilization
         while True:
-            # Initialize clusters
             clusters = [[] for _ in range(n_clusters)]
-
-            # Assignment step: Assign points to the nearest centroid
             for value in window_volatility:
                 distances = [abs(value - c) for c in centroids]
                 nearest_cluster = distances.index(min(distances))
                 clusters[nearest_cluster].append(value)
 
-            # Update step: Calculate new centroids
             new_centroids = [
-                np.mean(cluster) if cluster else centroids[i]
+                float(np.mean(cluster)) if cluster else centroids[i]
                 for i, cluster in enumerate(clusters)
             ]
 
-            # Convergence check: If centroids stabilize, exit loop
-            if np.allclose(new_centroids, centroids, atol=1e-6):  # Tolerance of 1e-6
+            if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
                 break
 
-            # Update centroids for the next iteration
             centroids = new_centroids
 
-        # Calculate cluster sizes
+        # Ensure cluster sizes are integers
         cluster_sizes = [len(cluster) for cluster in clusters]
+        cluster_sizes = list(map(int, cluster_sizes))
 
-        # Assign the most recent volatility value to a cluster
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
-        assigned_cluster = distances.index(min(distances)) + 1  # 1-based index
+        assigned_cluster = distances.index(min(distances)) + 1
         assigned_centroid = centroids[assigned_cluster - 1]
-
-        # Determine the dominant cluster
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
 
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
