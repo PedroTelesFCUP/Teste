@@ -193,30 +193,19 @@ def update_dashboard_callback(n):
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
-    """
-    Perform clustering on volatility with smoothed centroid updates using the mean of new and existing centroids.
-
-    Parameters:
-    - volatility: List of volatility values.
-    - n_clusters: Number of clusters (default is 3).
-
-    Returns:
-    - centroids: Updated centroids of the clusters.
-    - cluster_sizes: Sizes of each cluster.
-    - assigned_cluster: Cluster index for the most recent volatility value.
-    - assigned_centroid: Centroid value of the assigned cluster.
-    - dominant_cluster: Index of the cluster with the highest size.
-    """
     global centroids
 
     try:
+        # Ensure centroids are initialized
+        if centroids is None:
+            centroids = [0.0] * n_clusters
+
         # Ensure we have enough data points for clustering
         if len(volatility) < RECALC_INTERVAL:
-            return centroids or [0.0] * n_clusters, [0] * n_clusters, None, None, None
+            return centroids, [0] * n_clusters, None, None, None
 
         # Recalculate centroids every RECALC_INTERVAL data points
         if len(volatility) % RECALC_INTERVAL == 0:
-            # Use the last RECALC_INTERVAL points for recalculating centroids
             window_volatility = volatility[-RECALC_INTERVAL:]
             new_centroids = [
                 float(np.percentile(window_volatility, 25)),
@@ -225,13 +214,13 @@ def cluster_volatility(volatility, n_clusters=3):
             ]
             # Smooth centroid updates
             centroids = [
-                float(np.mean([new_centroids[0], centroids[0]])) if centroids else new_centroids[0],
-                float(np.mean([new_centroids[1], centroids[1]])) if centroids else new_centroids[1],
-                float(np.mean([new_centroids[2], centroids[2]])) if centroids else new_centroids[2]
+                float(np.mean([new_centroids[0], centroids[0]])),
+                float(np.mean([new_centroids[1], centroids[1]])),
+                float(np.mean([new_centroids[2], centroids[2]]))
             ]
             logging.info(f"Updated centroids: {centroids}")
 
-        # Cluster size calculation for the last RECALC_INTERVAL points
+        # Cluster size calculation
         cluster_sizes = [0] * n_clusters
         for v in volatility[-RECALC_INTERVAL:]:
             distances = [abs(v - c) for c in centroids]
