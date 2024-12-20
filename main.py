@@ -188,34 +188,66 @@ def update_dashboard_callback(n):
 
 
 # Perform K-Means Clustering on volatility
-def cluster_volatility(volatility, n_clusters=3, random_seed=None):
+def cluster_volatility(volatility, n_clusters=3, random_state=None):
     """
-    Perform K-Means clustering on volatility data with a specified random seed.
+    Perform K-Means clustering on volatility data with adaptive adjustments based on percentiles.
+
+    Parameters:
+    - volatility: List of volatility values.
+    - n_clusters: Number of clusters for K-Means (default: 3).
+    - random_state: Random seed for K-Means clustering.
+
+    Returns:
+    - centroids: Centroids of the clusters (dynamically adjusted).
+    - assigned_cluster: Cluster index (1, 2, 3) for the most recent volatility value.
+    - assigned_centroid: Centroid value of the assigned cluster.
+    - cluster_sizes: Sizes of each cluster.
+    - dominant_cluster: Index (1, 2, 3) of the cluster with the highest size.
     """
     try:
         if len(volatility) < n_clusters:
-            logging.warning("Not enough data for clustering. Returning None values.")
-            return None, None, None, None, None
+            logging.warning("Not enough data for clustering. Returning default values.")
+            return [None] * 5
+
+        # Convert volatility to a NumPy array for K-Means
+        volatility_array = np.array(volatility).reshape(-1, 1)
 
         # Perform K-Means clustering
-        volatility = np.array(volatility).reshape(-1, 1)
-        kmeans = KMeans(n_clusters=n_clusters, random_state=random_seed)  # Use specified seed
-        kmeans.fit(volatility)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
+        kmeans.fit(volatility_array)
 
+        # Extract centroids and cluster labels
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
+
+        # Calculate percentiles
+        low_volatility = np.percentile(volatility, 25)
+        medium_volatility = np.percentile(volatility, 50)
+        high_volatility = np.percentile(volatility, 75)
+
+        # Dynamically adjust centroids
+        centroids[0] = (centroids[0] + low_volatility) / 2
+        centroids[1] = (centroids[1] + medium_volatility) / 2
+        centroids[2] = (centroids[2] + high_volatility) / 2
+
+        # Count cluster sizes
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
 
-        latest_volatility = volatility[-1][0]
-        assigned_cluster = kmeans.predict([[latest_volatility]])[0] + 1
-        assigned_centroid = centroids[assigned_cluster - 1]
+        # Determine assigned cluster for the latest volatility value
+        latest_volatility = volatility[-1]
+        assigned_cluster = labels[-1] + 1  # Adjust index to match 1-based (1 = Low, 2 = Medium, 3 = High)
+        assigned_centroid = centroids[labels[-1]]
 
+        # Determine dominant cluster (largest size)
         dominant_cluster = np.argmax(cluster_sizes) + 1
 
+        # Return the results in the same format as before
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
+
     except Exception as e:
-        logging.error(f"Error in clustering: {e}", exc_info=True)
-        return None, None, None, None, None
+        logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
+        return [None] * 5
+
 
 
 # Calculate ATR
