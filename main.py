@@ -456,9 +456,6 @@ def heartbeat_logging():
     Updates band history to ensure data is current.
     """
     global primary_direction, secondary_direction
-    if not volatility or len(volatility) < 3:
-        logging.info("Heartbeat: Insufficient data for detailed logging.")
-        return
 
     try:
         # Perform clustering for primary and secondary signals
