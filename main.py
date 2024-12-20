@@ -208,8 +208,7 @@ def cluster_volatility(volatility, n_clusters=3):
     - dominant_cluster: Index of the cluster with the highest size.
     """
     try:
-
-        # Use the last 110 data points for clustering
+        # Use the last RECALC_INTERVAL data points for clustering
         window_volatility = volatility[-RECALC_INTERVAL:]
         
         # Initial centroids based on percentiles
