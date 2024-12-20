@@ -418,19 +418,26 @@ def heartbeat_logging():
         logging.info(
             f"\n=== Heartbeat Logging ===\n"
             f"Price: {last_price:.2f}\n"
-            f"Primary Cluster Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
+            f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
             f"Primary Cluster Sizes: {', '.join(str(size) for size in primary_cluster_sizes)}\n"
             f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
-            f"Secondary Cluster Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
+            f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
             f"Secondary Cluster Sizes: {', '.join(str(size) for size in secondary_cluster_sizes)}\n"
             f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
             f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
             f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
             f"Entry Price: {entry_price if entry_price else 'None'}\n"
-            f"Stop Loss: {stop_loss if stop_loss else 'None'}\n"
-            f"Take Profit: {take_profit if take_profit else 'None'}\n"
+            f"Stop Loss (Current): {stop_loss if stop_loss else 'None'}\n"
+            f"Take Profit (Current): {take_profit if take_profit else 'None'}\n"
+            f"Primary ATR (Current): {primary_volatility[-1]:.2f}\n"
+            f"Secondary ATR (Current): {secondary_volatility[-1]:.2f}\n"
+            f"Primary Upper Band (Current): {primary_upper_band.iloc[-1]:.2f}\n"
+            f"Primary Lower Band (Current): {primary_lower_band.iloc[-1]:.2f}\n"
+            f"Secondary Upper Band (Current): {secondary_upper_band.iloc[-1]:.2f}\n"
+            f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
             f"=========================="
         )
+
 
     except Exception as e:
         logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
