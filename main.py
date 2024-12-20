@@ -194,9 +194,8 @@ def update_dashboard_callback(n):
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
     """
-    Perform K-means clustering on volatility with centroid stabilization.
-    Ensures proper handling of cluster sizes and types during all iterations.
-    
+    Perform K-means clustering on volatility with initialization from sufficient data points.
+
     Parameters:
     - volatility: List of volatility values.
     - n_clusters: Number of clusters (default is 3).
@@ -209,60 +208,66 @@ def cluster_volatility(volatility, n_clusters=3):
     - dominant_cluster: Index of the cluster with the highest size.
     """
     try:
-        # Use the last RECALC_INTERVAL data points for clustering
-        window_volatility = volatility[-RECALC_INTERVAL:]
+        # Ensure sufficient data for clustering
+        if len(volatility) < 110:  # Adjusted for your initialization data size
+            logging.error(f"Insufficient data for clustering. Received: {len(volatility)}, Required: 110")
+            return [0.0] * n_clusters, [0] * n_clusters, None, None, None
 
-        # Initialize centroids using percentiles
+        # Use the last 110 data points for clustering
+        window_volatility = volatility[-110:]
+        
+        # Initial centroids based on percentiles
         centroids = [
-            float(np.percentile(window_volatility, 75)),
-            float(np.percentile(window_volatility, 50)),
-            float(np.percentile(window_volatility, 25))
+            float(np.percentile(window_volatility, 75)),  # High volatility
+            float(np.percentile(window_volatility, 50)),  # Medium volatility
+            float(np.percentile(window_volatility, 25))   # Low volatility
         ]
 
         # Iterative centroid stabilization
-        while True:
+        for _ in range(10):  # Limit iterations for stability
             clusters = [[] for _ in range(n_clusters)]
-            
-            # Assign data points to the nearest centroid
             for value in window_volatility:
                 distances = [abs(value - c) for c in centroids]
                 nearest_cluster = distances.index(min(distances))
                 clusters[nearest_cluster].append(value)
 
-            # Recalculate centroids
             new_centroids = [
                 float(np.mean(cluster)) if cluster else centroids[i]
                 for i, cluster in enumerate(clusters)
             ]
 
-            # Break loop if centroids stabilize
+            # Check for convergence
             if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
                 break
+
             centroids = new_centroids
 
         # Calculate cluster sizes
         cluster_sizes = [len(cluster) for cluster in clusters]
 
-        # Determine dominant cluster
-        dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
-
-        # Assign the most recent volatility value to a cluster
+        # Determine cluster for the latest volatility value
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
         assigned_cluster = distances.index(min(distances)) + 1
         assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Log for debugging
-        logging.debug(f"Cluster Sizes: {cluster_sizes}, Centroids: {centroids}, Dominant Cluster: {dominant_cluster}")
+        # Find dominant cluster
+        dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
+
+        # Log results
+        logging.info(
+            f"Cluster Sizes: {cluster_sizes}, "
+            f"Centroids: {', '.join(f'{c:.2f}' for c in centroids)}, "
+            f"Assigned Cluster: {assigned_cluster}, "
+            f"Dominant Cluster: {dominant_cluster}"
+        )
 
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
 
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
-        # Return default fallback values on error
-        return [0.0] * n_clusters, [0] * n_clusters, 0, 0.0, 0
-
+        return [0.0] * n_clusters, [0] * n_clusters, None, None, None
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=3):
@@ -852,46 +857,47 @@ def process_signals():
 
         try:
             # Signal processing every SIGNAL_INTERVAL seconds
-            try:
-                if not isinstance(primary_cluster_sizes, list):
-                    logging.error(f"Invalid type for primary_cluster_sizes: {type(primary_cluster_sizes)}")
-                    primary_cluster_sizes = [0] * 3  # Default to zeros
-                if not isinstance(secondary_cluster_sizes, list):
-                    logging.error(f"Invalid type for secondary_cluster_sizes: {type(secondary_cluster_sizes)}")
-                    secondary_cluster_sizes = [0] * 3  # Default to zeros
-
-                primary_direction, secondary_direction = calculate_and_execute(
-                    last_price, primary_direction, secondary_direction, 
-                    primary_cluster_sizes, secondary_cluster_sizes, 
-                    primary_dominant_cluster, secondary_dominant_cluster
-                )
-            except Exception as e:
-                logging.error(f"Error in process_signals loop: {e}", exc_info=True)
-
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
-                    # Perform clustering separately for primary and secondary volatilities
-                    primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
-                    secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
+                    try:
+                        # Perform clustering for primary and secondary volatilities
+                        primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+                        secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
 
-                    # Execute trading logic
-                    primary_direction, secondary_direction = calculate_and_execute(
-                        last_price, primary_direction, secondary_direction, 
-                        primary_cluster_sizes, secondary_cluster_sizes, 
-                        primary_dominant_cluster, secondary_dominant_cluster
-                    )
+                        # Check and ensure cluster sizes are valid
+                        if not isinstance(primary_cluster_sizes, list):
+                            logging.error(f"Invalid type for primary_cluster_sizes: {type(primary_cluster_sizes)}. Defaulting to [0, 0, 0].")
+                            primary_cluster_sizes = [0] * 3
+                        if not isinstance(secondary_cluster_sizes, list):
+                            logging.error(f"Invalid type for secondary_cluster_sizes: {type(secondary_cluster_sizes)}. Defaulting to [0, 0, 0].")
+                            secondary_cluster_sizes = [0] * 3
+
+                        # Execute trading logic
+                        primary_direction, secondary_direction = calculate_and_execute(
+                            last_price, primary_direction, secondary_direction,
+                            primary_cluster_sizes, secondary_cluster_sizes,
+                            primary_dominant_cluster, secondary_dominant_cluster
+                        )
+                    except Exception as e:
+                        logging.error(f"Error in clustering or execution: {e}", exc_info=True)
+
                 last_signal_time = current_time  # Update the last signal time
 
             # Heartbeat logging every 30 seconds
             if current_time - last_heartbeat_time >= 30:
-                heartbeat_logging()
+                try:
+                    heartbeat_logging()
+                except Exception as e:
+                    logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
+
                 last_heartbeat_time = current_time  # Update the last heartbeat time
 
         except Exception as e:
-            logging.error(f"Error in process_signals loop: {e}", exc_info=True)
+            logging.error(f"Unhandled error in process_signals loop: {e}", exc_info=True)
 
         # Sleep for a small interval to avoid excessive CPU usage
         time.sleep(1)
+
 
 # Main Script Entry Point
 if __name__ == "__main__":
