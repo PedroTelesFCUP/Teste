@@ -181,11 +181,11 @@ def cluster_volatility(volatility, n_clusters=3):
 
         # Identify the cluster of the latest volatility value
         latest_volatility = volatility[-1][0]
-        assigned_cluster = kmeans.predict([[latest_volatility]])[0]
+        assigned_cluster = kmeans.predict([[latest_volatility]])[0]+1
         assigned_centroid = centroids[assigned_cluster]
 
         # Find the dominant cluster
-        dominant_cluster = np.argmax(cluster_sizes)  # Cluster with the largest size
+        dominant_cluster = np.argmax(cluster_sizes)+1  # Cluster with the largest size
 
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
 
