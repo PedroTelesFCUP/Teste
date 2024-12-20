@@ -79,6 +79,9 @@ primary_centroids = []
 secondary_centroids = []
 primary_cluster_sizes = []
 secondary_cluster_sizes = []
+last centroids = None 
+volatility_threshold = 0.1  # Define a threshold for significant volatility changes
+RECALC_INTERVAL = 100  # Fixed recalculation interval for clustering
 buy_signal = {}
 sell_signal = {}
 
@@ -190,54 +193,53 @@ def update_dashboard_callback(n):
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
     """
-    Perform percentile-based clustering on a rolling window of the latest 100 data points.
+    Perform clustering on volatility with stabilized centroid updates.
 
     Parameters:
-    - volatility: List of volatility values (must include at least 101 points).
+    - volatility: List of volatility values (requires at least RECALC_INTERVAL points).
+    - n_clusters: Number of clusters (default is 3).
 
     Returns:
-    - centroids: Centroids of the clusters (dynamically adjusted).
+    - centroids: Stabilized centroids of the clusters.
     - assigned_cluster: Cluster index (1, 2, 3) for the most recent volatility value.
     - assigned_centroid: Centroid value of the assigned cluster.
     - cluster_sizes: Sizes of each cluster.
     - dominant_cluster: Index (1, 2, 3) of the cluster with the highest size.
     """
+    global last_centroids
     try:
-        # Ensure enough data is available
-       
-        # Use the latest 100 data points for clustering
-        window_volatility = volatility[-100:]
+        # Ensure sufficient data is available
+        if len(volatility) < RECALC_INTERVAL:
+            logging.warning("Insufficient data for clustering.")
+            return [None] * 5
 
-        # Initialize centroids using percentiles
-        low_volatility = np.percentile(window_volatility, 25)
-        medium_volatility = np.percentile(window_volatility, 50)
-        high_volatility = np.percentile(window_volatility, 75)
-        centroids = [low_volatility, medium_volatility, high_volatility]
+        # Use the latest RECALC_INTERVAL points for clustering
+        window_volatility = volatility[-RECALC_INTERVAL:]
 
-        # Iterative adjustment for 100 iterations
-        for iteration in range(100):
-            clusters = {i: [] for i in range(n_clusters)}
-            for atr in window_volatility:
-                distances = [abs(atr - c) for c in centroids]
-                cluster = distances.index(min(distances))
-                clusters[cluster].append(atr)
+        # Determine if centroids need to be recalculated
+        if last_centroids:
+            current_volatility_range = max(window_volatility) - min(window_volatility)
+            last_volatility_range = max(last_centroids) - min(last_centroids)
+            if abs(current_volatility_range - last_volatility_range) < volatility_threshold:
+                centroids = last_centroids
+            else:
+                centroids = _recalculate_centroids(window_volatility, n_clusters)
+        else:
+            centroids = _recalculate_centroids(window_volatility, n_clusters)
 
-            centroids = [np.mean(clusters[i]) if clusters[i] else centroids[i] for i in range(n_clusters)]
-        #    logging.info(f"Iteration {iteration + 1}: Centroids = {centroids}")
+        # Update global last_centroids
+        last_centroids = centroids
 
-        # Assign cluster to the latest volatility value
+        # Assign the latest volatility to a cluster
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
         assigned_cluster = distances.index(min(distances)) + 1  # 1-based index
         assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Determine cluster sizes
-        cluster_sizes = [len(clusters[i]) for i in range(n_clusters)]
-
-        # Find dominant cluster
+        # Calculate cluster sizes and dominant cluster
+        cluster_sizes = [sum(1 for v in window_volatility if abs(v - c) < volatility_threshold) for c in centroids]
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
 
-        # Return values in the original format
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
 
     except Exception as e:
@@ -245,6 +247,40 @@ def cluster_volatility(volatility, n_clusters=3):
         return [None] * 5
 
 
+def _recalculate_centroids(volatility, n_clusters):
+    """
+    Helper function to recalculate centroids for clustering.
+
+    Parameters:
+    - volatility: List of volatility values.
+    - n_clusters: Number of clusters.
+
+    Returns:
+    - centroids: Updated centroids for the clusters.
+    """
+    try:
+        # Initialize centroids using percentiles
+        centroids = [
+            np.percentile(volatility, 25),
+            np.percentile(volatility, 50),
+            np.percentile(volatility, 75)
+        ]
+
+        # Iterative refinement
+        for _ in range(100):  # Converge over 100 iterations
+            clusters = {i: [] for i in range(n_clusters)}
+            for v in volatility:
+                distances = [abs(v - c) for c in centroids]
+                cluster = distances.index(min(distances))
+                clusters[cluster].append(v)
+
+            # Update centroids based on cluster averages
+            centroids = [np.mean(clusters[i]) if clusters[i] else centroids[i] for i in range(n_clusters)]
+
+        return centroids
+    except Exception as e:
+        logging.error(f"Error recalculating centroids: {e}", exc_info=True)
+        return [None] * n_clusters
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=3):
