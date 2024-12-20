@@ -193,31 +193,29 @@ def cluster_volatility(volatility, n_clusters=3):
     Perform K-Means clustering on volatility data.
     """
     try:
-        # Validate input data length
         if len(volatility) < n_clusters:
-            logging.error(f"Insufficient data for clustering. Volatility length: {len(volatility)}")
+            logging.warning("Not enough data for clustering. Returning None values.")
             return None, None, None, None, None
 
-        # Prepare data for clustering
+        # Perform K-Means clustering
         volatility = np.array(volatility).reshape(-1, 1)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(volatility)
 
-        # Extract results
         centroids = kmeans.cluster_centers_.flatten()
         labels = kmeans.labels_
         cluster_sizes = [int(np.sum(labels == i)) for i in range(n_clusters)]
+
         latest_volatility = volatility[-1][0]
         assigned_cluster = kmeans.predict([[latest_volatility]])[0] + 1
         assigned_centroid = centroids[assigned_cluster - 1]
+
         dominant_cluster = np.argmax(cluster_sizes) + 1
 
         return centroids, assigned_cluster, assigned_centroid, cluster_sizes, dominant_cluster
-
     except Exception as e:
-        logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
+        logging.error(f"Error in clustering: {e}", exc_info=True)
         return None, None, None, None, None
-
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=1):
@@ -394,63 +392,35 @@ def calculate_supertrend_with_clusters(high, low, close, assigned_centroid, atr_
 
 
 # Execute Trades
-def execute_trade(symbol, quantity, take_profit, stop_loss, side):
+def execute_trade(symbol, quantity, side, stop_loss=None, take_profit=None):
     """
     Executes a trade order with Alpaca and handles errors.
-
+    
     :param symbol: The trading symbol (e.g., BTC/USD).
     :param quantity: The quantity to trade.
-    :param take_profit: The take-profit price.
-    :param stop_loss: The stop-loss price.
     :param side: The side of the trade ("buy" or "sell").
+    :param stop_loss: The stop-loss price.
+    :param take_profit: The take-profit price.
     """
     try:
         logging.info(f"Attempting to {side} {quantity} units of {symbol}.")
-
-        # Prepare optional parameters for stop-loss and take-profit
-        order_params = {
-            "symbol": symbol,
-            "qty": quantity,
-            "side": side,
-            "type": "market",
-            "time_in_force": "gtc",
-        }
-
-        if stop_loss:
-            order_params["order_class"] = "bracket"
-            order_params["stop_loss"] = {"stop_price": stop_loss}
-
-        if take_profit:
-            order_params["take_profit"] = {"limit_price": take_profit}
-
-        # Submit the order to Alpaca
-        order = alpaca_api.submit_order(**order_params)
-
+        
+        # Submit the order to Alpaca with stop-loss and take-profit
+        order = alpaca_api.submit_order(
+            symbol=symbol,
+            qty=quantity,
+            side=side,
+            type="market",
+            time_in_force="gtc",
+            stop_loss={"stop_price": stop_loss} if stop_loss else None,
+            take_profit={"limit_price": take_profit} if take_profit else None
+        )
+        
         # Confirm order status
         logging.info(f"{side.capitalize()} order submitted successfully. Order ID: {order.id}")
-
-        # Retrieve and log order details
-        order_details = alpaca_api.get_order(order.id)
-        logging.info(
-            f"Order Details:\n"
-            f"Symbol: {order_details.symbol}\n"
-            f"Quantity: {order_details.qty}\n"
-            f"Filled Quantity: {order_details.filled_qty}\n"
-            f"Side: {order_details.side}\n"
-            f"Status: {order_details.status}\n"
-            f"Submitted At: {order_details.submitted_at}"
-        )
-
-        # Handle partial fills
-        if order_details.status not in ["filled", "partially_filled"]:
-            logging.warning(f"Order status: {order_details.status}. Please check manually.")
-
+        
     except Exception as e:
-        logging.error(f"Error executing {side} order for {symbol}: {e}", exc_info=True)
-
-    
-    except Exception as e:
-        logging.error(f"Error executing {side} order for {symbol}: {e}", exc_info=True)
+        logging.error(f"Error executing {side} trade for {symbol}: {e}", exc_info=True)
 
 # Function for Heartbeat Logging
 def heartbeat_logging():
@@ -549,7 +519,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
     if primary_centroids is None or secondary_centroids is None:
-        logging.warning("Skipping signal processing due to missing cluster data.")
+    logging.warning("Skipping signal processing due to missing cluster data.")
     return primary_direction, secondary_direction
                               
     # Calculate SuperTrend
@@ -618,6 +588,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
                 )
             except Exception as e:
                 logging.error(f"Error executing buy trade: {e}")
+
 
     # Sell signal
     sell_signal = (
@@ -834,17 +805,13 @@ def process_signals():
                     # Perform clustering separately for primary and secondary volatilities
                     primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
                     secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
-                # Validate clustering outputs
-                if primary_dominant_cluster is None or secondary_dominant_cluster is None:
-                    logging.error("Clustering failed. Skipping signal processing.")
-                return
 
-                # Execute trading logic
-                primary_direction, secondary_direction = calculate_and_execute(
-                    last_price, primary_direction, secondary_direction, 
-                    primary_cluster_sizes, secondary_cluster_sizes, 
-                    primary_dominant_cluster, secondary_dominant_cluster
-                )
+                    # Execute trading logic
+                    primary_direction, secondary_direction = calculate_and_execute(
+                        last_price, primary_direction, secondary_direction, 
+                        primary_cluster_sizes, secondary_cluster_sizes, 
+                        primary_dominant_cluster, secondary_dominant_cluster
+                    )
                 last_signal_time = current_time  # Update the last signal time
 
             # Heartbeat logging every 30 seconds
