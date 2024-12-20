@@ -284,7 +284,7 @@ def initialize_historical_data():
     """
     Initializes historical market data for high, low, close prices, and volatility.
     """
-    global high, low, close, volatility, primary_volatility, secondary_volatility
+    global high, low, close, primary_volatility, secondary_volatility
     try:
         # Fetch historical data from Binance
         logging.info(f"Fetching historical data for {BINANCE_SYMBOL} with interval 1m.")
@@ -320,8 +320,6 @@ def initialize_historical_data():
         else:
             secondary_volatility = []
 
-        # Update volatility (generic list for legacy compatibility)
-        volatility = primary_volatility
 
         # Log initialization success or warning
         if not primary_volatility or not secondary_volatility:
@@ -332,7 +330,7 @@ def initialize_historical_data():
     except Exception as e:
         logging.error(f"Error initializing historical data for {BINANCE_SYMBOL}: {e}")
         # Reset to empty lists on failure
-        high, low, close, volatility, primary_volatility, secondary_volatility = [], [], [], [], [], []
+        high, low, close, primary_volatility, secondary_volatility = [], [], [], [], []
 
 
 def initialize_direction(high, low, close, atr_factor, assigned_centroid):
