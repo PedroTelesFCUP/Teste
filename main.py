@@ -190,11 +190,10 @@ def update_dashboard_callback(n):
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
     """
-    Perform percentile-based clustering on volatility data with iterative adjustments.
+    Perform percentile-based clustering on a rolling window of the latest 100 data points.
 
     Parameters:
-    - volatility: List of volatility values.
-    - n_clusters: Number of clusters (default: 3).
+    - volatility: List of volatility values (must include at least 101 points).
 
     Returns:
     - centroids: Centroids of the clusters (dynamically adjusted).
@@ -204,21 +203,24 @@ def cluster_volatility(volatility, n_clusters=3):
     - dominant_cluster: Index (1, 2, 3) of the cluster with the highest size.
     """
     try:
-        if len(volatility) < n_clusters:
+        # Ensure enough data is available
+        if len(volatility) < 101:
             logging.warning("Not enough data for clustering. Returning default values.")
             return [None] * 5
 
+        # Use the latest 100 data points for clustering
+        window_volatility = volatility[-100:]
+
         # Initialize centroids using percentiles
-        low_volatility = np.percentile(volatility, 25)
-        medium_volatility = np.percentile(volatility, 50)
-        high_volatility = np.percentile(volatility, 75)
+        low_volatility = np.percentile(window_volatility, 25)
+        medium_volatility = np.percentile(window_volatility, 50)
+        high_volatility = np.percentile(window_volatility, 75)
         centroids = [low_volatility, medium_volatility, high_volatility]
 
         # Iterative adjustment for 100 iterations
-        max_iterations = 100
-        for iteration in range(max_iterations):
+        for iteration in range(100):
             clusters = {i: [] for i in range(n_clusters)}
-            for atr in volatility:
+            for atr in window_volatility:
                 distances = [abs(atr - c) for c in centroids]
                 cluster = distances.index(min(distances))
                 clusters[cluster].append(atr)
@@ -244,7 +246,6 @@ def cluster_volatility(volatility, n_clusters=3):
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
         return [None] * 5
-
 
 
 
