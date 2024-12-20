@@ -211,6 +211,11 @@ def cluster_volatility(volatility, n_clusters=3):
         # Use the last RECALC_INTERVAL data points for clustering
         window_volatility = volatility[-RECALC_INTERVAL:]
 
+        # Check for sufficient data
+        if len(window_volatility) < n_clusters:
+            logging.warning(f"Insufficient data for clustering: {len(window_volatility)} points available.")
+            return [0.0] * n_clusters, [0] * n_clusters, None, None, None
+
         # Initial centroids based on percentiles
         centroids = [
             float(np.percentile(window_volatility, 75)),  # High volatility
@@ -260,6 +265,7 @@ def cluster_volatility(volatility, n_clusters=3):
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
         return [0.0] * n_clusters, [0] * n_clusters, None, None, None
+
 
 
 # Calculate ATR
