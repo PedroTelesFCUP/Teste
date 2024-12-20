@@ -472,7 +472,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         return primary_direction, secondary_direction
 
     # Calculate SuperTrend
-    new_primary_direction, _, _ = calculate_supertrend_with_clusters(
+    new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
         high, low, close, primary_volatility[-1], PRIMARY_ATR_FACTOR, primary_direction
     )
     new_secondary_direction, secondary_upper_band, secondary_lower_band = calculate_supertrend_with_clusters(
@@ -528,6 +528,10 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
         f"Entry Price: {entry_price if entry_price else 'None'}\n"
         f"Stop Loss: {stop_loss_display}\n"
         f"Take Profit: {take_profit_display}\n"
+        f"Primary Upper Band (Current): {primary_upper_band.iloc[-1]:.2f}\n"
+        f"Primary Lower Band (Current): {primary_lower_band.iloc[-1]:.2f}\n"
+        f"Secondary Upper Band (Current): {secondary_upper_band.iloc[-1]:.2f}\n"
+        f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
         f"=========================="
     )
 
