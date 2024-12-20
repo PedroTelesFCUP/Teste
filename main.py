@@ -643,22 +643,24 @@ def plot_signals_with_markers(highs, lows, closes, directions, upper_band, lower
     return fig
 
 # Update the dashboard to include combined logging data
-def update_dashboard():
-    global high, low, close, upper_band_history, lower_band_history, last_price
-    global primary_centroids, primary_cluster_sizes, primary_dominant_cluster
-    global secondary_centroids, secondary_cluster_sizes, secondary_dominant_cluster
-
+@dash_app.callback(
+    [Output('primary-chart', 'figure'),
+     Output('secondary-chart', 'figure'),
+     Output('metrics-table', 'children')],
+    [Input('update-interval', 'n_intervals')]
+)
+def update_dashboard_callback(n):
     try:
-        # Perform clustering for primary and secondary signals if not already available
-        if not (primary_cluster_sizes and secondary_cluster_sizes):
-            primary_centroids, _, _, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
-            secondary_centroids, _, _, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
-
-        # Create price and bands chart
+        # Create primary chart
         fig_primary = go.Figure()
         fig_primary.add_trace(go.Scatter(y=close[-10:], mode='lines', name='Close Price', line=dict(color='blue')))
-        fig_primary.add_trace(go.Scatter(y=upper_band_history[-10:], mode='lines', name='Primary Upper Band', line=dict(color='green', dash='dash')))
-        fig_primary.add_trace(go.Scatter(y=lower_band_history[-10:], mode='lines', name='Primary Lower Band', line=dict(color='red', dash='dash')))
+        fig_primary.add_trace(go.Scatter(y=primary_upper_band[-10:], mode='lines', name='Primary Upper Band', line=dict(color='green', dash='dash')))
+        fig_primary.add_trace(go.Scatter(y=primary_lower_band[-10:], mode='lines', name='Primary Lower Band', line=dict(color='red', dash='dash')))
+
+        # Create secondary chart
+        fig_secondary = plot_signals_with_markers(
+            high, low, close, secondary_direction, secondary_upper_band, secondary_lower_band, buy_sell_signals
+        )
 
         # Create table rows for metrics
         metrics = [
@@ -668,15 +670,17 @@ def update_dashboard():
             ["Primary Dominant Cluster", f"{primary_dominant_cluster}"],
             ["Secondary Clustering Centroids", ", ".join(f"{x:.2f}" for x in secondary_centroids)],
             ["Secondary Cluster Sizes", ", ".join(str(size) for size in secondary_cluster_sizes)],
-            ["Secondary Dominant Cluster", f"{secondary_dominant_cluster}"]
+            ["Secondary Dominant Cluster", f"{secondary_dominant_cluster}"],
+            ["Primary ATR", f"{primary_volatility[-1]:.2f}"],
+            ["Secondary ATR", f"{secondary_volatility[-1]:.2f}"]
         ]
         rows = [html.Tr([html.Th(metric[0]), html.Td(metric[1])]) for metric in metrics]
 
-        return fig_primary, rows
+        return fig_primary, fig_secondary, rows
 
     except Exception as e:
         logging.error(f"Error updating dashboard: {e}", exc_info=True)
-        return go.Figure(), []  # Return an empty figure and table on error
+        return go.Figure(), go.Figure(), []
 
 
 # WebSocket Handler
