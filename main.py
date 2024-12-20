@@ -193,34 +193,17 @@ def update_dashboard_callback(n):
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
-    """
-    Perform K-means clustering on volatility with centroid stabilization.
-
-    Parameters:
-    - volatility: List of volatility values.
-    - n_clusters: Number of clusters (default is 3).
-
-    Returns:
-    - centroids: Stabilized centroids of the clusters (list of floats).
-    - cluster_sizes: Sizes of each cluster (list of integers).
-    - assigned_cluster: Cluster index for the most recent volatility value.
-    - assigned_centroid: Centroid value of the assigned cluster.
-    - dominant_cluster: Index of the cluster with the highest size.
-    """
     try:
-        # Ensure there are enough data points for clustering
         if len(volatility) < RECALC_INTERVAL:
             return [0.0] * n_clusters, [0] * n_clusters, None, None, None
 
-        # Initialize centroids using percentiles
         window_volatility = volatility[-RECALC_INTERVAL:]
         centroids = [
-            float(np.percentile(window_volatility, 75)),  # High volatility
-            float(np.percentile(window_volatility, 50)),  # Medium volatility
-            float(np.percentile(window_volatility, 25))   # Low volatility
+            float(np.percentile(window_volatility, 75)),
+            float(np.percentile(window_volatility, 50)),
+            float(np.percentile(window_volatility, 25)),
         ]
 
-        # Iterative centroid stabilization
         while True:
             clusters = [[] for _ in range(n_clusters)]
             for value in window_volatility:
@@ -236,12 +219,10 @@ def cluster_volatility(volatility, n_clusters=3):
             if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
                 break
-
             centroids = new_centroids
 
-        # Ensure cluster sizes are integers
         cluster_sizes = [len(cluster) for cluster in clusters]
-        cluster_sizes = list(map(int, cluster_sizes))  # Explicitly enforce integer type
+        cluster_sizes = list(map(int, cluster_sizes))  # Enforce integer sizes
 
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
@@ -249,11 +230,7 @@ def cluster_volatility(volatility, n_clusters=3):
         assigned_centroid = centroids[assigned_cluster - 1]
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
 
-        # Log outputs for debugging
-        logging.debug(f"Cluster Sizes: {cluster_sizes}, Centroids: {centroids}")
-
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
-
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
         return [None] * n_clusters, [0] * n_clusters, None, None, None
@@ -847,9 +824,21 @@ def process_signals():
 
         try:
             # Signal processing every SIGNAL_INTERVAL seconds
-            if not isinstance(primary_cluster_sizes, list) or not isinstance(secondary_cluster_sizes, list):
-                logging.error("Invalid cluster sizes detected. Skipping signal processing.")
-            return
+            try:
+                if not isinstance(primary_cluster_sizes, list):
+                    logging.error(f"Invalid type for primary_cluster_sizes: {type(primary_cluster_sizes)}")
+                    primary_cluster_sizes = [0] * 3  # Default to zeros
+                if not isinstance(secondary_cluster_sizes, list):
+                    logging.error(f"Invalid type for secondary_cluster_sizes: {type(secondary_cluster_sizes)}")
+                    secondary_cluster_sizes = [0] * 3  # Default to zeros
+
+                primary_direction, secondary_direction = calculate_and_execute(
+                    last_price, primary_direction, secondary_direction, 
+                    primary_cluster_sizes, secondary_cluster_sizes, 
+                    primary_dominant_cluster, secondary_dominant_cluster
+                )
+            except Exception as e:
+                logging.error(f"Error in process_signals loop: {e}", exc_info=True)
 
             if current_time - last_signal_time >= SIGNAL_INTERVAL:
                 if last_price is not None:
