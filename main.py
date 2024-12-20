@@ -208,11 +208,6 @@ def cluster_volatility(volatility, n_clusters=3):
     - dominant_cluster: Index of the cluster with the highest size.
     """
     try:
-        # Ensure sufficient data for clustering
-        required_data_points = 100  # Required number of data points for clustering
-        if len(volatility) < required_data_points:
-            logging.error(f"Insufficient data for clustering. Received: {len(volatility)}, Required: {required_data_points}")
-            return [0.0] * n_clusters, [0] * n_clusters, None, None, None
 
         # Use the last 110 data points for clustering
         window_volatility = volatility[-required_data_points:]
@@ -224,8 +219,9 @@ def cluster_volatility(volatility, n_clusters=3):
             float(np.percentile(window_volatility, 25))   # Low volatility
         ]
 
-        # Iterative centroid stabilization with a maximum of 10 iterations
-        for iteration in range(10):
+        # Iterative centroid stabilization until convergence
+        iteration_count = 0
+        while True:
             clusters = [[] for _ in range(n_clusters)]
             for value in window_volatility:
                 distances = [abs(value - c) for c in centroids]
@@ -240,10 +236,11 @@ def cluster_volatility(volatility, n_clusters=3):
             # Check for convergence
             if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
-                logging.info(f"Converged after {iteration + 1} iterations.")
+                logging.info(f"Converged after {iteration_count + 1} iterations.")
                 break
 
             centroids = new_centroids
+            iteration_count += 1
 
         # Calculate cluster sizes
         cluster_sizes = [len(cluster) for cluster in clusters]
