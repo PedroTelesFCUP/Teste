@@ -193,10 +193,17 @@ def update_dashboard_callback(n):
 
 # Perform K-Means Clustering on volatility
 def cluster_volatility(volatility, n_clusters=3):
+    """
+    Perform clustering on volatility using a K-means-like approach, updating cluster sizes and centroids iteratively.
+
+    :param volatility: List of volatility values.
+    :param n_clusters: Number of clusters (default is 3).
+    :return: Updated centroids, cluster sizes, assigned cluster, assigned centroid, dominant cluster.
+    """
     global centroids
 
     try:
-        # Ensure centroids are initialized
+        # Initialize centroids if not already initialized
         if centroids is None:
             centroids = [0.0] * n_clusters
 
@@ -204,36 +211,48 @@ def cluster_volatility(volatility, n_clusters=3):
         if len(volatility) < RECALC_INTERVAL:
             return centroids, [0] * n_clusters, None, None, None
 
-        # Recalculate centroids every RECALC_INTERVAL data points
+        # Trigger recalculation every RECALC_INTERVAL points
         if len(volatility) % RECALC_INTERVAL == 0:
             window_volatility = volatility[-RECALC_INTERVAL:]
-            new_centroids = [
-                float(np.percentile(window_volatility, 25)),
-                float(np.percentile(window_volatility, 50)),
-                float(np.percentile(window_volatility, 75))
-            ]
-            # Smooth centroid updates
+            previous_centroids = centroids.copy()  # To check stabilization
+
+            # Initialize cluster sizes
+            cluster_sizes = [0] * n_clusters
+
+            # Assign volatility values to the closest centroids
+            for v in window_volatility:
+                distances = [abs(v - c) for c in centroids]
+                closest_cluster = distances.index(min(distances))
+                cluster_sizes[closest_cluster] += 1
+
+            # Recalculate centroids based on cluster assignments
+            new_centroids = []
+            for i in range(n_clusters):
+                cluster_values = [v for v in window_volatility if abs(v - centroids[i]) == min([abs(v - c) for c in centroids])]
+                if cluster_values:  # Avoid empty clusters
+                    new_centroids.append(sum(cluster_values) / len(cluster_values))
+                else:
+                    new_centroids.append(centroids[i])  # Retain previous centroid
+
             centroids = [
-                float(np.mean([new_centroids[0], centroids[0]])),
-                float(np.mean([new_centroids[1], centroids[1]])),
-                float(np.mean([new_centroids[2], centroids[2]]))
+                float(np.mean([new_centroids[0], previous_centroids[0]])),
+                float(np.mean([new_centroids[1], previous_centroids[1]])),
+                float(np.mean([new_centroids[2], previous_centroids[2]]))
             ]
+
             logging.info(f"Updated centroids: {centroids}")
 
-        # Cluster size calculation
-        cluster_sizes = [0] * n_clusters
-        for v in volatility[-RECALC_INTERVAL:]:
-            distances = [abs(v - c) for c in centroids]
-            cluster = distances.index(min(distances))
-            cluster_sizes[cluster] += 1
+            # Check for stabilization
+            if previous_centroids == centroids:
+                logging.info("Centroids stabilized.")
 
-        # Assign the most recent value to a cluster
+        # Assign the most recent volatility value to a cluster
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
         assigned_cluster = distances.index(min(distances)) + 1  # 1-based index
         assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Determine the dominant cluster
+        # Determine the dominant cluster (largest size)
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
 
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
@@ -241,6 +260,7 @@ def cluster_volatility(volatility, n_clusters=3):
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
         return [None] * 5
+
 
 
 # Calculate ATR
