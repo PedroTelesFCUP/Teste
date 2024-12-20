@@ -210,7 +210,7 @@ def cluster_volatility(volatility, n_clusters=3):
     try:
         # Use the last RECALC_INTERVAL data points for clustering
         window_volatility = volatility[-RECALC_INTERVAL:]
-        
+
         # Initial centroids based on percentiles
         centroids = [
             float(np.percentile(window_volatility, 75)),  # High volatility
@@ -219,7 +219,6 @@ def cluster_volatility(volatility, n_clusters=3):
         ]
 
         # Iterative centroid stabilization until convergence
-        iteration_count = 0
         while True:
             clusters = [[] for _ in range(n_clusters)]
             for value in window_volatility:
@@ -235,18 +234,17 @@ def cluster_volatility(volatility, n_clusters=3):
             # Check for convergence
             if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
-                logging.info(f"Converged after {iteration_count + 1} iterations.")
                 break
 
             centroids = new_centroids
-            iteration_count += 1
 
         # Calculate cluster sizes
         cluster_sizes = [len(cluster) for cluster in clusters]
 
-        # Validate cluster sizes
-        if any(size == 0 for size in cluster_sizes):
-            logging.warning("One or more clusters have zero elements. Check data distribution.")
+        # Ensure cluster sizes are always lists
+        if not isinstance(cluster_sizes, list):
+            logging.error(f"Cluster sizes is not a list: {cluster_sizes} (type: {type(cluster_sizes)})")
+            cluster_sizes = [0] * n_clusters
 
         # Determine cluster for the latest volatility value
         latest_volatility = volatility[-1]
@@ -257,19 +255,12 @@ def cluster_volatility(volatility, n_clusters=3):
         # Find dominant cluster (cluster with the largest size)
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
 
-        # Log results
-        logging.info(
-            f"Cluster Sizes: {cluster_sizes}, "
-            f"Centroids: {', '.join(f'{c:.2f}' for c in centroids)}, "
-            f"Assigned Cluster: {assigned_cluster}, "
-            f"Dominant Cluster: {dominant_cluster}"
-        )
-
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
 
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
         return [0.0] * n_clusters, [0] * n_clusters, None, None, None
+
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=3):
@@ -489,8 +480,17 @@ def heartbeat_logging():
 
     try:
         # Perform clustering for primary and secondary signals
-        primary_centroids, primary_assigned_cluster, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
-        secondary_centroids, secondary_assigned_cluster, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
+        primary_centroids, primary_cluster_sizes, primary_assigned_cluster, primary_assigned_centroid, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+        secondary_centroids, secondary_cluster_sizes, secondary_assigned_cluster, secondary_assigned_centroid, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
+
+        # Validate cluster sizes
+        if not isinstance(primary_cluster_sizes, list):
+            logging.error(f"Primary cluster sizes is not a list: {primary_cluster_sizes} (type: {type(primary_cluster_sizes)})")
+            primary_cluster_sizes = [0] * 3
+
+        if not isinstance(secondary_cluster_sizes, list):
+            logging.error(f"Secondary cluster sizes is not a list: {secondary_cluster_sizes} (type: {type(secondary_cluster_sizes)})")
+            secondary_cluster_sizes = [0] * 3
 
         # Calculate SuperTrend for both signals
         new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
@@ -534,12 +534,6 @@ def heartbeat_logging():
             f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
             f"=========================="
         )
-
-
-    except Exception as e:
-        logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
-
-
 
     except Exception as e:
         logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
@@ -844,6 +838,10 @@ def start_websocket():
             time.sleep(30)  # Wait before reconnecting
 
 def process_signals():
+    """
+    Main loop for processing trading signals and executing trades at defined intervals.
+    Handles clustering, trading logic, and heartbeat logging.
+    """
     global last_signal_time, last_heartbeat_time, primary_direction, secondary_direction
 
     # Align to the next 30-second mark minus a few seconds (e.g., 3 seconds before)
@@ -863,10 +861,10 @@ def process_signals():
                 if last_price is not None:
                     try:
                         # Perform clustering for primary and secondary volatilities
-                        primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
-                        secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
+                        primary_centroids, primary_cluster_sizes, primary_assigned_cluster, primary_assigned_centroid, primary_dominant_cluster = cluster_volatility(primary_volatility, n_clusters=3)
+                        secondary_centroids, secondary_cluster_sizes, secondary_assigned_cluster, secondary_assigned_centroid, secondary_dominant_cluster = cluster_volatility(secondary_volatility, n_clusters=3)
 
-                        # Check and ensure cluster sizes are valid
+                        # Validate cluster sizes
                         if not isinstance(primary_cluster_sizes, list):
                             logging.error(f"Invalid type for primary_cluster_sizes: {type(primary_cluster_sizes)}. Defaulting to [0, 0, 0].")
                             primary_cluster_sizes = [0] * 3
