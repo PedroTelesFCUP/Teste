@@ -209,12 +209,13 @@ def cluster_volatility(volatility, n_clusters=3):
     """
     try:
         # Ensure sufficient data for clustering
-        if len(volatility) < 110:  # Adjusted for your initialization data size
-            logging.error(f"Insufficient data for clustering. Received: {len(volatility)}, Required: 110")
+        required_data_points = 100  # Required number of data points for clustering
+        if len(volatility) < required_data_points:
+            logging.error(f"Insufficient data for clustering. Received: {len(volatility)}, Required: {required_data_points}")
             return [0.0] * n_clusters, [0] * n_clusters, None, None, None
 
         # Use the last 110 data points for clustering
-        window_volatility = volatility[-110:]
+        window_volatility = volatility[-required_data_points:]
         
         # Initial centroids based on percentiles
         centroids = [
@@ -223,8 +224,8 @@ def cluster_volatility(volatility, n_clusters=3):
             float(np.percentile(window_volatility, 25))   # Low volatility
         ]
 
-        # Iterative centroid stabilization
-        for _ in range(10):  # Limit iterations for stability
+        # Iterative centroid stabilization with a maximum of 10 iterations
+        for iteration in range(10):
             clusters = [[] for _ in range(n_clusters)]
             for value in window_volatility:
                 distances = [abs(value - c) for c in centroids]
@@ -239,6 +240,7 @@ def cluster_volatility(volatility, n_clusters=3):
             # Check for convergence
             if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
+                logging.info(f"Converged after {iteration + 1} iterations.")
                 break
 
             centroids = new_centroids
@@ -246,13 +248,17 @@ def cluster_volatility(volatility, n_clusters=3):
         # Calculate cluster sizes
         cluster_sizes = [len(cluster) for cluster in clusters]
 
+        # Validate cluster sizes
+        if any(size == 0 for size in cluster_sizes):
+            logging.warning("One or more clusters have zero elements. Check data distribution.")
+
         # Determine cluster for the latest volatility value
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
         assigned_cluster = distances.index(min(distances)) + 1
         assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Find dominant cluster
+        # Find dominant cluster (cluster with the largest size)
         dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
 
         # Log results
