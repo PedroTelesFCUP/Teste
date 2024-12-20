@@ -195,7 +195,8 @@ def update_dashboard_callback(n):
 def cluster_volatility(volatility, n_clusters=3):
     """
     Perform K-means clustering on volatility with centroid stabilization.
-
+    Ensures proper handling of cluster sizes and types during all iterations.
+    
     Parameters:
     - volatility: List of volatility values.
     - n_clusters: Number of clusters (default is 3).
@@ -208,38 +209,25 @@ def cluster_volatility(volatility, n_clusters=3):
     - dominant_cluster: Index of the cluster with the highest size.
     """
     try:
-        # Ensure there are enough data points for clustering
-        if len(volatility) < RECALC_INTERVAL:
-            logging.warning("Not enough data points for clustering. Returning default values.")
-            return [0.0] * n_clusters, [0] * n_clusters, None, None, 0
+        # Use the last RECALC_INTERVAL data points for clustering
+        window_volatility = volatility[-RECALC_INTERVAL:]
 
         # Initialize centroids using percentiles
-        window_volatility = volatility[-RECALC_INTERVAL:]
         centroids = [
-            float(np.percentile(window_volatility, 75)),  # High volatility
-            float(np.percentile(window_volatility, 50)),  # Medium volatility
-            float(np.percentile(window_volatility, 25))   # Low volatility
+            float(np.percentile(window_volatility, 75)),
+            float(np.percentile(window_volatility, 50)),
+            float(np.percentile(window_volatility, 25))
         ]
-
-        clusters = [[] for _ in range(n_clusters)]  # Initialize clusters
-        cluster_sizes = [0] * n_clusters  # Initialize cluster sizes
 
         # Iterative centroid stabilization
         while True:
-            # Assign each value to the nearest cluster
+            clusters = [[] for _ in range(n_clusters)]
+            
+            # Assign data points to the nearest centroid
             for value in window_volatility:
                 distances = [abs(value - c) for c in centroids]
                 nearest_cluster = distances.index(min(distances))
                 clusters[nearest_cluster].append(value)
-
-            # Ensure cluster sizes are updated
-            cluster_sizes = [len(cluster) for cluster in clusters]
-
-            # Handle empty clusters
-            for i, cluster in enumerate(clusters):
-                if not cluster:  # If cluster is empty, retain the previous centroid
-                    clusters[i] = []
-                    logging.warning(f"Cluster {i + 1} is empty; retaining previous centroid.")
 
             # Recalculate centroids
             new_centroids = [
@@ -247,48 +235,34 @@ def cluster_volatility(volatility, n_clusters=3):
                 for i, cluster in enumerate(clusters)
             ]
 
-            # Break the loop if centroids stabilize
+            # Break loop if centroids stabilize
             if np.allclose(new_centroids, centroids, atol=1e-6):
                 centroids = new_centroids
                 break
-
             centroids = new_centroids
 
-        # Handle edge cases
-        if sum(cluster_sizes) == 0:
-            logging.warning("All clusters are empty. Returning default dominant cluster.")
-            dominant_cluster = 0
-        else:
-            dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
+        # Calculate cluster sizes
+        cluster_sizes = [len(cluster) for cluster in clusters]
 
-        # Handle latest volatility and assign cluster
+        # Determine dominant cluster
+        dominant_cluster = cluster_sizes.index(max(cluster_sizes)) + 1
+
+        # Assign the most recent volatility value to a cluster
         latest_volatility = volatility[-1]
         distances = [abs(latest_volatility - c) for c in centroids]
-        if all(d == 0 for d in distances):  # Handle all-zero distances
-            logging.warning("All distances are zero. Assigning default cluster.")
-            assigned_cluster = 1
-            assigned_centroid = centroids[0]
-        else:
-            assigned_cluster = distances.index(min(distances)) + 1
-            assigned_centroid = centroids[assigned_cluster - 1]
+        assigned_cluster = distances.index(min(distances)) + 1
+        assigned_centroid = centroids[assigned_cluster - 1]
 
-        # Fallback for None values
-        if centroids is None:
-            centroids = [0.0] * n_clusters
-        if cluster_sizes is None:
-            cluster_sizes = [0] * n_clusters
-        if dominant_cluster is None:
-            dominant_cluster = 0
-
-        # Log outputs for debugging
+        # Log for debugging
         logging.debug(f"Cluster Sizes: {cluster_sizes}, Centroids: {centroids}, Dominant Cluster: {dominant_cluster}")
 
         return centroids, cluster_sizes, assigned_cluster, assigned_centroid, dominant_cluster
 
     except Exception as e:
         logging.error(f"Error in cluster_volatility: {e}", exc_info=True)
-        # Return default values on failure
-        return [0.0] * n_clusters, [0] * n_clusters, None, None, 0
+        # Return default fallback values on error
+        return [0.0] * n_clusters, [0] * n_clusters, 0, 0.0, 0
+
 
 # Calculate ATR
 def calculate_atr(high, low, close, factor=3):
