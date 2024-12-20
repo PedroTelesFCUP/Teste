@@ -518,9 +518,7 @@ def calculate_and_execute(price, primary_direction, secondary_direction,
     primary_centroids, _, primary_assigned_centroid, primary_cluster_sizes, primary_dominant_cluster = cluster_volatility(primary_volatility)
     secondary_centroids, _, secondary_assigned_centroid, secondary_cluster_sizes, secondary_dominant_cluster = cluster_volatility(secondary_volatility)
 
-    if primary_centroids is None or secondary_centroids is None:
-    logging.warning("Skipping signal processing due to missing cluster data.")
-    return primary_direction, secondary_direction
+
                               
     # Calculate SuperTrend
     new_primary_direction, primary_upper_band, primary_lower_band = calculate_supertrend_with_clusters(
