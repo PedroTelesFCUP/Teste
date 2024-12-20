@@ -429,13 +429,16 @@ def heartbeat_logging():
         stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
         take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
 
-        # Logging detailed information
         logging.info(
-            f"\n=== Heartbeat Logging ===\n"
+            f"\n=== Combined Logging ===\n"
             f"Price: {last_price:.2f}\n"
-            f"Cluster Centroids: {', '.join(f'{x:.2f}' for x in centroids)}\n"
-            f"Cluster Sizes: {', '.join(str(size) for size in cluster_sizes)}\n"
-            f"Dominant Cluster: {dominant_cluster}\n"
+            f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
+            f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
+            f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
+            f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
+            f"Cluster Sizes (Primary): {', '.join(str(size) for size in cluster_sizes)}\n"
+            f"Primary ATR (Current): {atr_primary.iloc[-1]:.2f}\n"
+            f"Secondary ATR (Current): {atr_secondary.iloc[-1]:.2f}\n"
             f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
             f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
             f"Entry Price: {entry_price if entry_price else 'None'}\n"
@@ -447,6 +450,8 @@ def heartbeat_logging():
             f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
             f"=========================="
         )
+
+
     except Exception as e:
         logging.error(f"Error during heartbeat logging: {e}", exc_info=True)
 
@@ -511,19 +516,27 @@ def calculate_and_execute(price, primary_direction, secondary_direction):
     stop_loss_display = f"{stop_loss:.2f}" if stop_loss else "None"
     take_profit_display = f"{take_profit:.2f}" if take_profit else "None"
     logging.info(
-        f"\n=== Signal Processing ===\n"
-        f"Price: {price:.2f}\n"
+        f"\n=== Combined Logging ===\n"
+        f"Price: {last_price:.2f}\n"
         f"Primary Clustering Centroids: {', '.join(f'{x:.2f}' for x in primary_centroids)}\n"
         f"Primary Dominant Cluster: {primary_dominant_cluster}\n"
         f"Secondary Clustering Centroids: {', '.join(f'{x:.2f}' for x in secondary_centroids)}\n"
         f"Secondary Dominant Cluster: {secondary_dominant_cluster}\n"
+        f"Cluster Sizes (Primary): {', '.join(str(size) for size in cluster_sizes)}\n"
+        f"Primary ATR (Current): {atr_primary.iloc[-1]:.2f}\n"
+        f"Secondary ATR (Current): {atr_secondary.iloc[-1]:.2f}\n"
         f"Primary Direction: {'Bullish (1)' if primary_direction == 1 else 'Bearish (-1)'}\n"
         f"Secondary Direction: {'Bullish (1)' if secondary_direction == 1 else 'Bearish (-1)'}\n"
         f"Entry Price: {entry_price if entry_price else 'None'}\n"
         f"Stop Loss: {stop_loss_display}\n"
         f"Take Profit: {take_profit_display}\n"
+        f"Primary Upper Band (Current): {primary_upper_band.iloc[-1]:.2f}\n"
+        f"Primary Lower Band (Current): {primary_lower_band.iloc[-1]:.2f}\n"
+        f"Secondary Upper Band (Current): {secondary_upper_band.iloc[-1]:.2f}\n"
+        f"Secondary Lower Band (Current): {secondary_lower_band.iloc[-1]:.2f}\n"
         f"=========================="
     )
+
 
     return new_primary_direction, new_secondary_direction
 
