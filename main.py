@@ -69,6 +69,7 @@ upper_band_history = []
 lower_band_history = []
 upper_band_300_history = []  # Stores only the 300-second upper bands
 lower_band_300_history = []  # Stores only the 300-second lower bands
+last_secondary_directions = []
 entry_price = None
 primary_direction = 1  # Default to Bullish
 secondary_direction = 1 # Default to Bullish
@@ -603,40 +604,7 @@ def update_dashboard():
     return fig, rows
 
 # WebSocket Handler
-def on_message(msg):
-    global last_price, high, low, close, primary_volatility, secondary_volatility
-
-    if 'k' not in msg:
-        return
-
-    candle = msg['k']
-    last_price = float(candle['c'])
-    high.append(float(candle['h']))
-    low.append(float(candle['l']))
-    close.append(float(candle['c']))
-
-    # Limit the length of historical data
-    if len(high) > ATR_LEN + 1:
-        high.pop(0)
-    if len(low) > ATR_LEN + 1:
-        low.pop(0)
-    if len(close) > ATR_LEN + 1:
-        close.pop(0)
-
-    # Update ATR for both signals
-    if len(high) >= ATR_LEN:
-        primary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=8)
-        secondary_atr = calculate_atr(pd.Series(high), pd.Series(low), pd.Series(close), factor=3)
-
-        if primary_atr:
-            primary_volatility.append(primary_atr)
-            if len(primary_volatility) > 100:
-                primary_volatility.pop(0)
-
-        if secondary_atr:
-            secondary_volatility.append(secondary_atr)
-            if len(secondary_volatility) > 100:
-                secondary_volatility.pop(0)
+last_secondary_directions = []
 
 
 # WebSocket Manager
