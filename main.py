@@ -210,7 +210,7 @@ def cluster_volatility(volatility, n_clusters=3):
     try:
 
         # Use the last 110 data points for clustering
-        window_volatility = volatility[-required_data_points:]
+        window_volatility = volatility[-RECALC_INTERVAL:]
         
         # Initial centroids based on percentiles
         centroids = [
