@@ -494,29 +494,28 @@ def on_message_candle(msg):
         logging.error(f"Error in on_message_candle: {e}", exc_info=True)
 def start_binance_websocket():
     """
-    Start Binance WebSocket with ping/pong monitoring.
+    Start Binance WebSocket without manual ping/pong.
+    If an error occurs, it waits 30 seconds and retries.
     """
     while True:
         try:
             logging.info("Starting Binance WebSocket...")
-            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+            twm = ThreadedWebsocketManager(
+                api_key=BINANCE_API_KEY,
+                api_secret=BINANCE_SECRET_KEY
+            )
             twm.start()
 
-            # Start the kline socket for the specified symbol and interval
-            twm.start_kline_socket(callback=on_message_candle, symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL)
+            # Start the kline socket for the specified symbol/interval
+            twm.start_kline_socket(
+                callback=on_message_candle,
+                symbol=BINANCE_SYMBOL.lower(),
+                interval=BINANCE_INTERVAL
+            )
 
-            # Monitor the connection with pings
-            last_ping_time = time.time()
-            while True:
-                current_time = time.time()
-
-                # Check if it's time to send a ping
-                if current_time - last_ping_time > 30:  # Binance recommends pings every 30 seconds
-                    logging.info("Sending ping to Binance WebSocket...")
-                    twm.ping()  # Manually send a ping
-                    last_ping_time = current_time
-
-                time.sleep(1)
+            # Block here and keep the WebSocket alive
+            logging.info("Binance WebSocket is now running. Waiting for data...")
+            twm.join()  # twm.join() will block until an error or shutdown
 
         except Exception as e:
             logging.error(f"WebSocket error: {e}. Reconnecting in 30 seconds...")
