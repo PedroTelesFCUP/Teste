@@ -10,7 +10,6 @@ from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
 from sklearn.cluster import KMeans
 import numpy as np
-import matplotlib.pyplot as plt  # Optional: For visualization
 
 from logging.handlers import RotatingFileHandler
 
