@@ -4,6 +4,7 @@ import time
 import logging
 import threading
 from datetime import datetime
+from flask import Flask
 import json
 
 from binance import ThreadedWebsocketManager
@@ -155,6 +156,12 @@ last_heartbeat_time = 0
 lock = threading.Lock()
 
 print("Global variables initialized. (Running as a background worker or standalone script.)")
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is working"
 
 ##########################################
 # HELPER FUNCTIONS
@@ -903,6 +910,12 @@ def main():
 
 if __name__ == "__main__":
     try:
+        # Start Flask app in a separate thread
+        flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000))))
+        flask_thread.daemon = True
+        flask_thread.start()
+
+        # Start main bot logic
         main()
     except KeyboardInterrupt:
         logger.info("Bot terminated by user.")
