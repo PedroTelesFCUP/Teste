@@ -102,7 +102,6 @@ def wilder_smoothing(values, period):
     clean_values = [v for v in values if v is not None]
     if len(clean_values) < period:
         return [None]*len(values)
-    # Align from first non-None
     start_index = 0
     for idx,v in enumerate(values):
         if v is not None:
@@ -112,14 +111,11 @@ def wilder_smoothing(values, period):
     result = [None]*length
     if length - start_index < period:
         return result
-
-    # initial
     window = values[start_index:start_index+period]
     if any(x is None for x in window):
         return result
     atr_val = sum(window)/period
     result[start_index+period-1] = atr_val
-
     for i in range(start_index+period, length):
         if values[i] is None or result[i-1] is None:
             result[i] = None
@@ -265,13 +261,15 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
         logging.error(f"Alpaca order failed: {e}", exc_info=True)
 
 def heartbeat_logging():
+    global last_heartbeat_time
+    print("Heartbeat thread starting...")
     logging.info("Heartbeat thread started...")
     while True:
         try:
             now = time.time()
             if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
                 with lock:
-                    global last_heartbeat_time
+                    
                     if len(close_array) == 0:
                         logging.info("No data yet.")
                     else:
@@ -280,6 +278,12 @@ def heartbeat_logging():
                         s_dir = secondary_direction[i] if i<len(secondary_direction) else None
                         c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
                         last_atr = atr_array[i] if i<len(atr_array) else None
+                        
+                        # Compute assigned_centroid for current bar
+                        assigned_centroid = None
+                        if c_idx is not None and hv_new is not None and mv_new is not None and lv_new is not None:
+                            assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+
                         pri_st = primary_supertrend[i] if i<len(primary_supertrend) else None
                         sec_st = secondary_supertrend[i] if i<len(secondary_supertrend) else None
 
@@ -288,7 +292,17 @@ def heartbeat_logging():
                         msg += f"Primary Dir: {p_dir}\n"
                         msg += f"Secondary Dir: {s_dir}\n"
                         msg += f"Cluster: {c_idx if c_idx is not None else 'None'} (0=High,1=Med,2=Low)\n"
-                        msg += f"ATR: {last_atr if last_atr is not None else 'N/A'}\n"
+                        msg += f"Base ATR (Assigned Centroid): {assigned_centroid if assigned_centroid else 'N/A'}\n"
+                        # If we have assigned_centroid, compute primary and secondary ATR from it
+                        if assigned_centroid is not None:
+                            primary_atr_val = assigned_centroid * PRIMARY_FACTOR
+                            secondary_atr_val = assigned_centroid * SECONDARY_FACTOR
+                        else:
+                            primary_atr_val = 'N/A'
+                            secondary_atr_val = 'N/A'
+
+                        msg += f"Primary ATR: {primary_atr_val}\n"
+                        msg += f"Secondary ATR: {secondary_atr_val}\n"
                         msg += f"PriST: {pri_st if pri_st else 'N/A'}\n"
                         msg += f"SecST: {sec_st if sec_st else 'N/A'}\n"
                         msg += f"In Position: {in_position} ({position_side})\n"
@@ -302,6 +316,7 @@ def heartbeat_logging():
         time.sleep(1)
 
 def check_signals():
+    print("Signal checking thread starting...")
     logging.info("Signal checking thread started...")
     while True:
         try:
@@ -313,8 +328,8 @@ def check_signals():
                     if t < START_TIME or t > END_TIME:
                         if in_position:
                             logging.info("Outside trading window. Closing position.")
-                            execute_trade("sell", QTY, SYMBOL_ALPACA)
                             global in_position, position_side, entry_price
+                            execute_trade("sell", QTY, SYMBOL_ALPACA)
                             in_position = False
                             position_side = None
                             entry_price = None
@@ -347,7 +362,7 @@ def check_signals():
                                 entry_price = current_price
 
                             # SHORT ENTRY
-                            if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
+                            if (not in_position) and bearish_bearish_bullish and p_dir == -1 and c_idx == 0:
                                 sl = high_array[i]
                                 dist = sl - current_price
                                 tp = current_price - (1.5 * dist)
@@ -447,8 +462,7 @@ def on_message_candle(msg):
 
                 data_count = len(close_array)
                 if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
-                    start_idx = data_count - TRAINING_DATA_PERIOD
-                    vol_data = [x for x in atr_array[start_idx:] if x is not None]
+                    vol_data = [x for x in atr_array[data_count-TRAINING_DATA_PERIOD:] if x is not None]
                     if len(vol_data) == TRAINING_DATA_PERIOD:
                         upper_val = max(vol_data)
                         lower_val = min(vol_data)
@@ -492,6 +506,7 @@ def on_message_candle(msg):
         logging.error(f"Error in on_message_candle: {e}", exc_info=True)
 
 def start_binance_websocket():
+    print("Binance WebSocket thread starting...")
     logging.info("Starting Binance WebSocket...")
     while True:
         try:
@@ -548,6 +563,7 @@ def update_dashboard(n):
         length = len(close_array)
         indices = list(range(length))
 
+        # Primary figure
         primary_fig = go.Figure()
         primary_fig.add_trace(go.Scatter(x=indices, y=close_array, mode='lines', name='Close', line=dict(color='blue')))
         if primary_upperBand:
@@ -568,6 +584,7 @@ def update_dashboard(n):
                 primary_fig.add_trace(go.Scatter(x=[idx_s], y=[price_s], mode='markers', marker=dict(symbol='triangle-down', size=10, color='red'), name='Sell'))
         primary_fig.update_layout(title="Primary Signal")
 
+        # Secondary figure
         secondary_fig = go.Figure()
         secondary_fig.add_trace(go.Scatter(x=indices, y=close_array, mode='lines', name='Close', line=dict(color='blue')))
         if secondary_upperBand:
@@ -594,7 +611,7 @@ def update_dashboard(n):
             ["Primary Cluster Sizes", ", ".join(str(s) for s in primary_cluster_sizes)],
             ["Dominant Cluster", f"{dominant_cluster}"],
             ["Current Cluster", f"{current_cluster if current_cluster is not None else 'N/A'}"],
-            ["ATR", f"{last_atr}"],
+            ["Base ATR", f"{last_atr} (Note: Factors apply)"],
             ["In Position", str(in_position)],
             ["Position Side", f"{position_side if position_side else 'None'}"],
             ["Entry Price", f"{entry_price if entry_price else 'None'}"]
@@ -612,9 +629,10 @@ def update_dashboard(n):
         return primary_fig, secondary_fig, table_rows
 
 def run_dashboard():
+    print("Dashboard thread starting...")
     logging.info("Starting Dash dashboard on port 8080")
-    port=8080
-    dash_app.run_server(host='0.0.0.0', port=port, debug=False)
+    # Hardcode port 8080
+    dash_app.run_server(host='0.0.0.0', port=8080, debug=False)
 
 ##########################################
 # MAIN
@@ -634,5 +652,4 @@ if __name__ == "__main__":
 
     # Start binance websocket (blocking)
     start_binance_websocket()
-
 
