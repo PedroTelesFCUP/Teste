@@ -497,20 +497,14 @@ def on_message_candle(msg):
 def start_binance_websocket():
     print("Binance WebSocket thread starting...")
     logging.info("Starting Binance WebSocket...")
-    while True:
-        try:
-            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
-            twm.start()
-            twm.start_kline_socket(
-                callback=on_message_candle,
-                symbol=BINANCE_SYMBOL.lower(),
-                interval=BINANCE_INTERVAL
-            )
-            twm.join()
-        except Exception as e:
-            logging.error(f"Binance WebSocket error: {e}", exc_info=True)
-            logging.info("Reconnecting in 30 seconds...")
-            time.sleep(30)
+    twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+    twm.start()
+    twm.start_kline_socket(
+        callback=on_message_candle,
+        symbol=BINANCE_SYMBOL.lower(),
+        interval=BINANCE_INTERVAL
+    )
+    twm.join()
 
 ##########################################
 # MAIN
@@ -541,6 +535,10 @@ if __name__ == "__main__":
     server_thread.start()
 
     # Start binance websocket (blocking)
-    start_binance_websocket()
+    try:
+        start_binance_websocket()
+    except Exception as e:
+        logging.error(f"Binance WebSocket error: {e}", exc_info=True)
+        sys.exit(1)
 
 
