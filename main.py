@@ -10,6 +10,7 @@ from datetime import datetime
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
+from flask import Flask
 
 ##########################################
 # CONFIGURATION & LOGGING
@@ -350,7 +351,7 @@ def check_signals():
                                 entry_price = current_price
 
                             # SHORT ENTRY
-                            if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
+                            if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
                                 sl = high_array[i]
                                 dist = sl - current_price
                                 tp = current_price - (1.5 * dist)
@@ -524,6 +525,22 @@ if __name__ == "__main__":
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
 
+    # Additionally start a minimal Flask server so that Render sees an open port.
+    # If you don't want this, convert to a background worker on Render.
+    server = Flask(__name__)
+
+    @server.route("/")
+    def home():
+        return "Bot is running!", 200
+
+    def run_server():
+        print("Starting minimal web server on port 8080...")
+        server.run(host="0.0.0.0", port=8080)
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
     # Start binance websocket (blocking)
     start_binance_websocket()
+
 
