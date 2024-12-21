@@ -316,6 +316,7 @@ def heartbeat_logging():
         time.sleep(1)
 
 def check_signals():
+    global in_position, position_side, entry_price
     print("Signal checking thread starting...")
     logging.info("Signal checking thread started...")
     while True:
@@ -328,7 +329,7 @@ def check_signals():
                     if t < START_TIME or t > END_TIME:
                         if in_position:
                             logging.info("Outside trading window. Closing position.")
-                            global in_position, position_side, entry_price
+                            
                             execute_trade("sell", QTY, SYMBOL_ALPACA)
                             in_position = False
                             position_side = None
