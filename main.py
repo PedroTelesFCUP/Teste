@@ -911,7 +911,7 @@ def main():
 if __name__ == "__main__":
     try:
         # Start Flask app in a separate thread
-        flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000))))
+        flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
         flask_thread.daemon = True
         flask_thread.start()
 
