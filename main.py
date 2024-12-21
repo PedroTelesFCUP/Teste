@@ -383,10 +383,11 @@ def check_signals():
 
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
-    global hv_new, mv_new, lv_new  # Must come before any reference to hv_new, mv_new, lv_new
+    global hv_new, mv_new, lv_new  # Declare globals at the start of the function
 
     if 'k' not in msg:
         return
+
     k = msg['k']
     is_final = k['x']
     close_price = float(k['c'])
@@ -408,11 +409,12 @@ def on_message_candle(msg):
             low_array.pop(0)
             close_array.pop(0)
 
-        # Recompute ATR from scratch for simplicity
+        # Recompute ATR
         new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
         atr_array.clear()
         atr_array.extend(new_atr)
-        # Trim atr_array to match candle count
+
+        # Trim atr_array if necessary
         while len(atr_array) > len(close_array):
             atr_array.pop(0)
 
@@ -445,7 +447,7 @@ def on_message_candle(msg):
         fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
         fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
 
-        # Possibly run K-Means if we have enough bars
+        # Possibly run K-Means
         data_count = len(close_array)
         if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
             start_idx = data_count - TRAINING_DATA_PERIOD
@@ -457,7 +459,6 @@ def on_message_candle(msg):
                 mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
                 lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
 
-                global hv_new, mv_new, lv_new
                 hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
                 hv_new, mv_new, lv_new = hvf, mvf, lvf
                 logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
@@ -466,7 +467,7 @@ def on_message_candle(msg):
         i = len(close_array)-1
         assigned_centroid = None
         vol = atr_array[i]
-        global hv_new, mv_new, lv_new
+
         if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
             dA = abs(vol - hv_new)
             dB = abs(vol - mv_new)
@@ -492,6 +493,7 @@ def on_message_candle(msg):
             last_secondary_directions.append(secondary_direction[i])
             if len(last_secondary_directions) > 10:
                 last_secondary_directions.pop(0)
+
 
 def start_binance_websocket():
     logging.info("Starting Binance WebSocket...")
