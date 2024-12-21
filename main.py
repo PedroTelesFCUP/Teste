@@ -7,11 +7,6 @@ import logging
 import threading
 from datetime import datetime
 
-import plotly.graph_objs as go
-from dash import Dash, dcc, html
-from dash.dependencies import Input, Output
-from flask import Flask
-
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
@@ -57,7 +52,7 @@ MAX_CANDLES = 100
 CLUSTER_RUN_ONCE = True
 
 # Globals
-alpaca_api = AlpacaREST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
+alpaca_api = REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 binance_client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
 
 time_array = []
@@ -269,7 +264,6 @@ def heartbeat_logging():
             now = time.time()
             if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
                 with lock:
-                    
                     if len(close_array) == 0:
                         logging.info("No data yet.")
                     else:
@@ -277,13 +271,9 @@ def heartbeat_logging():
                         p_dir = primary_direction[i] if i<len(primary_direction) else None
                         s_dir = secondary_direction[i] if i<len(secondary_direction) else None
                         c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
-                        last_atr = atr_array[i] if i<len(atr_array) else None
-                        
-                        # Compute assigned_centroid for current bar
                         assigned_centroid = None
                         if c_idx is not None and hv_new is not None and mv_new is not None and lv_new is not None:
                             assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-
                         pri_st = primary_supertrend[i] if i<len(primary_supertrend) else None
                         sec_st = secondary_supertrend[i] if i<len(secondary_supertrend) else None
 
@@ -293,14 +283,12 @@ def heartbeat_logging():
                         msg += f"Secondary Dir: {s_dir}\n"
                         msg += f"Cluster: {c_idx if c_idx is not None else 'None'} (0=High,1=Med,2=Low)\n"
                         msg += f"Base ATR (Assigned Centroid): {assigned_centroid if assigned_centroid else 'N/A'}\n"
-                        # If we have assigned_centroid, compute primary and secondary ATR from it
                         if assigned_centroid is not None:
                             primary_atr_val = assigned_centroid * PRIMARY_FACTOR
                             secondary_atr_val = assigned_centroid * SECONDARY_FACTOR
                         else:
                             primary_atr_val = 'N/A'
                             secondary_atr_val = 'N/A'
-
                         msg += f"Primary ATR: {primary_atr_val}\n"
                         msg += f"Secondary ATR: {secondary_atr_val}\n"
                         msg += f"PriST: {pri_st if pri_st else 'N/A'}\n"
@@ -329,7 +317,6 @@ def check_signals():
                     if t < START_TIME or t > END_TIME:
                         if in_position:
                             logging.info("Outside trading window. Closing position.")
-                            
                             execute_trade("sell", QTY, SYMBOL_ALPACA)
                             in_position = False
                             position_side = None
@@ -363,7 +350,7 @@ def check_signals():
                                 entry_price = current_price
 
                             # SHORT ENTRY
-                            if (not in_position) and bearish_bearish_bullish and p_dir == -1 and c_idx == 0:
+                            if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
                                 sl = high_array[i]
                                 dist = sl - current_price
                                 tp = current_price - (1.5 * dist)
@@ -525,122 +512,11 @@ def start_binance_websocket():
             time.sleep(30)
 
 ##########################################
-# DASHBOARD
-##########################################
-server = Flask(__name__)
-
-@server.route("/")
-def home():
-    return "Bot is running!", 200
-
-dash_app = Dash(__name__, server=server, url_base_pathname="/dashboard/")
-
-dash_app.layout = html.Div([
-    html.H1("Trading Bot Dashboard", style={'text-align': 'center'}),
-    html.Div([
-        dcc.Graph(id='primary-chart', style={'height': '50vh'}),
-        dcc.Graph(id='secondary-chart', style={'height': '50vh'}),
-    ]),
-    html.H3("Metrics Table", style={'margin-top': '20px'}),
-    html.Table(id='metrics-table', style={'width': '100%', 'border': '1px solid black', 'border-collapse': 'collapse'}),
-    dcc.Interval(
-        id='update-interval',
-        interval=30*1000,
-        n_intervals=0
-    )
-])
-
-@dash_app.callback(
-    [Output('primary-chart', 'figure'),
-     Output('secondary-chart', 'figure'),
-     Output('metrics-table', 'children')],
-    [Input('update-interval', 'n_intervals')]
-)
-def update_dashboard(n):
-    with lock:
-        if len(close_array) == 0:
-            return go.Figure(), go.Figure(), [html.Tr([html.Th("No data available")])]
-
-        length = len(close_array)
-        indices = list(range(length))
-
-        # Primary figure
-        primary_fig = go.Figure()
-        primary_fig.add_trace(go.Scatter(x=indices, y=close_array, mode='lines', name='Close', line=dict(color='blue')))
-        if primary_upperBand:
-            primary_fig.add_trace(go.Scatter(x=indices, y=primary_upperBand, mode='lines', name='Primary Upper', line=dict(color='green', dash='dash')))
-        if primary_lowerBand:
-            primary_fig.add_trace(go.Scatter(x=indices, y=primary_lowerBand, mode='lines', name='Primary Lower', line=dict(color='red', dash='dash')))
-
-        primary_st_green = [primary_supertrend[i] if (i<len(primary_direction) and primary_direction[i]==1) else None for i in indices]
-        primary_st_red = [primary_supertrend[i] if (i<len(primary_direction) and primary_direction[i]==-1) else None for i in indices]
-
-        primary_fig.add_trace(go.Scatter(x=indices, y=primary_st_green, mode='lines', name='Pri ST Bullish', line=dict(color='green')))
-        primary_fig.add_trace(go.Scatter(x=indices, y=primary_st_red, mode='lines', name='Pri ST Bearish', line=dict(color='red')))
-        for (idx_b, price_b) in buy_signals:
-            if 0 <= idx_b < length:
-                primary_fig.add_trace(go.Scatter(x=[idx_b], y=[price_b], mode='markers', marker=dict(symbol='triangle-up', size=10, color='green'), name='Buy'))
-        for (idx_s, price_s) in sell_signals:
-            if 0 <= idx_s < length:
-                primary_fig.add_trace(go.Scatter(x=[idx_s], y=[price_s], mode='markers', marker=dict(symbol='triangle-down', size=10, color='red'), name='Sell'))
-        primary_fig.update_layout(title="Primary Signal")
-
-        # Secondary figure
-        secondary_fig = go.Figure()
-        secondary_fig.add_trace(go.Scatter(x=indices, y=close_array, mode='lines', name='Close', line=dict(color='blue')))
-        if secondary_upperBand:
-            secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_upperBand, mode='lines', name='Sec Upper', line=dict(color='green', dash='dash')))
-        if secondary_lowerBand:
-            secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_lowerBand, mode='lines', name='Sec Lower', line=dict(color='red', dash='dash')))
-
-        secondary_st_green = [secondary_supertrend[i] if (i<len(secondary_direction) and secondary_direction[i]==1) else None for i in indices]
-        secondary_st_red = [secondary_supertrend[i] if (i<len(secondary_direction) and secondary_direction[i]==-1) else None for i in indices]
-
-        secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_st_green, mode='lines', name='Sec ST Bullish', line=dict(color='green')))
-        secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_st_red, mode='lines', name='Sec ST Bearish', line=dict(color='red')))
-        secondary_fig.update_layout(title="Secondary Signal")
-
-        last_atr = atr_array[-1] if len(atr_array)>0 and atr_array[-1] is not None else "N/A"
-        current_cluster = cluster_assignments[-1] if len(cluster_assignments)>0 else None
-        primary_centroids = [hv_new, mv_new, lv_new] if hv_new is not None and mv_new is not None and lv_new is not None else ["N/A","N/A","N/A"]
-        primary_cluster_sizes = ["N/A","N/A","N/A"]
-        dominant_cluster = "N/A"
-
-        metrics = [
-            ["Price", f"{close_array[-1]:.2f}"],
-            ["Primary Clustering Centroids (HV,MV,LV)", ", ".join([f"{x:.2f}" if isinstance(x,float) else str(x) for x in primary_centroids])],
-            ["Primary Cluster Sizes", ", ".join(str(s) for s in primary_cluster_sizes)],
-            ["Dominant Cluster", f"{dominant_cluster}"],
-            ["Current Cluster", f"{current_cluster if current_cluster is not None else 'N/A'}"],
-            ["Base ATR", f"{last_atr} (Note: Factors apply)"],
-            ["In Position", str(in_position)],
-            ["Position Side", f"{position_side if position_side else 'None'}"],
-            ["Entry Price", f"{entry_price if entry_price else 'None'}"]
-        ]
-
-        table_rows = []
-        for row in metrics:
-            table_rows.append(
-                html.Tr([
-                    html.Th(row[0], style={'border':'1px solid black','padding':'5px'}),
-                    html.Td(row[1], style={'border':'1px solid black','padding':'5px'})
-                ])
-            )
-
-        return primary_fig, secondary_fig, table_rows
-
-def run_dashboard():
-    print("Dashboard thread starting...")
-    logging.info("Starting Dash dashboard on port 8080")
-    # Hardcode port 8080
-    dash_app.run_server(host='0.0.0.0', port=8080, debug=False)
-
-##########################################
 # MAIN
 ##########################################
 if __name__ == "__main__":
     print("Main function start: Starting threads...")
-    logging.info("Starting heartbeat, signals, and dashboard threads.")
+    logging.info("Starting heartbeat and signals threads.")
 
     hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
     hb_thread.start()
@@ -648,9 +524,7 @@ if __name__ == "__main__":
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
 
-    dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
-    dashboard_thread.start()
-
     # Start binance websocket (blocking)
     start_binance_websocket()
+
 
