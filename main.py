@@ -492,24 +492,36 @@ def on_message_candle(msg):
 
     except Exception as e:
         logging.error(f"Error in on_message_candle: {e}", exc_info=True)
-
 def start_binance_websocket():
-    print("Binance WebSocket thread starting...")
-    logging.info("Starting Binance WebSocket...")
+    """
+    Start Binance WebSocket with ping/pong monitoring.
+    """
     while True:
         try:
+            logging.info("Starting Binance WebSocket...")
             twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
-            twm.start_kline_socket(
-                callback=on_message_candle,
-                symbol=BINANCE_SYMBOL.lower(),
-                interval=BINANCE_INTERVAL
-            )
-            twm.join()
+
+            # Start the kline socket for the specified symbol and interval
+            twm.start_kline_socket(callback=on_message_candle, symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL)
+
+            # Monitor the connection with pings
+            last_ping_time = time.time()
+            while True:
+                current_time = time.time()
+
+                # Check if it's time to send a ping
+                if current_time - last_ping_time > 30:  # Binance recommends pings every 30 seconds
+                    logging.info("Sending ping to Binance WebSocket...")
+                    twm.ping()  # Manually send a ping
+                    last_ping_time = current_time
+
+                time.sleep(1)
+
         except Exception as e:
-            logging.error(f"Binance WebSocket error: {e}", exc_info=True)
-            logging.info("Reconnecting in 30 seconds...")
-            time.sleep(30)
+            logging.error(f"WebSocket error: {e}. Reconnecting in 30 seconds...")
+            time.sleep(30)  # Wait before reconnecting
+
 
 ##########################################
 # MAIN
