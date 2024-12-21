@@ -11,7 +11,7 @@ from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
 from sklearn.cluster import KMeans
 import numpy as np
-import matplotlib.pyplot as plt  # Optional: For visualization
+# import matplotlib.pyplot as plt  # Optional: For visualization
 
 from logging.handlers import RotatingFileHandler
 
@@ -51,7 +51,7 @@ class ExcludeHeartbeatFilter(logging.Filter):
         return not getattr(record, 'heartbeat', False)
 
 # Add custom filter to console_handler to exclude heartbeat messages
-console_handler.addFilter(ExcludeHeartbeatFilter())
+# console_handler.addFilter(ExcludeHeartbeatFilter())
 
 # Add handlers to the logger
 logger.addHandler(console_handler)
