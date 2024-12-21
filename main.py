@@ -10,7 +10,6 @@ from datetime import datetime
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
-from flask import Flask
 
 ##########################################
 # CONFIGURATION & LOGGING
@@ -24,7 +23,7 @@ logging.basicConfig(
 )
 logging.info("Logging initialized.")
 
-# Env variables or replace with your keys
+# Environment variables or replace with your keys
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "YOUR_BINANCE_API_KEY")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "YOUR_BINANCE_SECRET_KEY")
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "YOUR_ALPACA_API_KEY")
@@ -497,14 +496,20 @@ def on_message_candle(msg):
 def start_binance_websocket():
     print("Binance WebSocket thread starting...")
     logging.info("Starting Binance WebSocket...")
-    twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
-    twm.start()
-    twm.start_kline_socket(
-        callback=on_message_candle,
-        symbol=BINANCE_SYMBOL.lower(),
-        interval=BINANCE_INTERVAL
-    )
-    twm.join()
+    while True:
+        try:
+            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+            twm.start()
+            twm.start_kline_socket(
+                callback=on_message_candle,
+                symbol=BINANCE_SYMBOL.lower(),
+                interval=BINANCE_INTERVAL
+            )
+            twm.join()
+        except Exception as e:
+            logging.error(f"Binance WebSocket error: {e}", exc_info=True)
+            logging.info("Reconnecting in 30 seconds...")
+            time.sleep(30)
 
 ##########################################
 # MAIN
@@ -519,26 +524,8 @@ if __name__ == "__main__":
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
 
-    # Additionally start a minimal Flask server so that Render sees an open port.
-    # If you don't want this, convert to a background worker on Render.
-    server = Flask(__name__)
-
-    @server.route("/")
-    def home():
-        return "Bot is running!", 200
-
-    def run_server():
-        print("Starting minimal web server on port 8080...")
-        server.run(host="0.0.0.0", port=8080)
-
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
-
+    # No dashboard, no server. Running as a background worker on Render.
     # Start binance websocket (blocking)
-    try:
-        start_binance_websocket()
-    except Exception as e:
-        logging.error(f"Binance WebSocket error: {e}", exc_info=True)
-        sys.exit(1)
+    start_binance_websocket()
 
 
