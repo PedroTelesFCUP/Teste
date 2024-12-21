@@ -249,7 +249,6 @@ def run_kmeans(vol_data, n_clusters=3, random_state=0):
         return None, None, None, [], {}
 
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
-    """Computes the SuperTrend indicator for a given index."""
     with lock:
         length = len(close_array)
         if i < 0 or i >= length:
@@ -294,21 +293,23 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         else:
             upBand = prevUB
 
-        # Determine direction
-        wasUpper = (prevDir != -1)
-        if wasUpper:
-            if close_array[i] > upBand:
-                dir_array[i] = -1
-            else:
-                dir_array[i] = 1
-        else:
+        # Determine direction based on standard SuperTrend logic
+        if prevDir == 1:  # Previously Bullish
             if close_array[i] < downBand:
-                dir_array[i] = 1
+                dir_array[i] = -1  # Change to Bearish
             else:
-                dir_array[i] = -1
+                dir_array[i] = 1   # Continue Bullish
+        elif prevDir == -1:  # Previously Bearish
+            if close_array[i] > upBand:
+                dir_array[i] = 1   # Change to Bullish
+            else:
+                dir_array[i] = -1  # Continue Bearish
+        else:
+            # Default to previous direction if undefined
+            dir_array[i] = prevDir
 
-        # Set SuperTrend value
-        st_array[i] = downBand if dir_array[i] == -1 else upBand
+        # Set SuperTrend value based on current direction
+        st_array[i] = downBand if dir_array[i] == 1 else upBand
         ub_array[i] = upBand
         lb_array[i] = downBand
 
