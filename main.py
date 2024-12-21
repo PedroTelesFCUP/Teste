@@ -52,7 +52,7 @@ MAX_CANDLES = 100
 CLUSTER_RUN_ONCE = True
 
 # Globals
-alpaca_api = REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
+alpaca_api = AlpacaREST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 binance_client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
 
 time_array = []
@@ -350,7 +350,7 @@ def check_signals():
                                 entry_price = current_price
 
                             # SHORT ENTRY
-                            if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
+                            if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
                                 sl = high_array[i]
                                 dist = sl - current_price
                                 tp = current_price - (1.5 * dist)
@@ -526,5 +526,4 @@ if __name__ == "__main__":
 
     # Start binance websocket (blocking)
     start_binance_websocket()
-
 
