@@ -50,10 +50,10 @@ LOWVOL_PERCENTILE = 0.25
 HEARTBEAT_INTERVAL = 30
 SIGNAL_CHECK_INTERVAL = 1
 
-# We keep only the last MAX_CANDLES in memory
+# Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 100
 
-# If True, run K-Means once after we get enough data
+# If True, run K-Means once after enough data is received
 CLUSTER_RUN_ONCE = True
 
 # Globals
@@ -193,6 +193,86 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         if stable_a and stable_b and stable_c:
             return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
 
+##########################################
+# INITIALIZE HISTORICAL DATA
+##########################################
+def initialize_historical_data():
+    """
+    Fetch 100 historical 1-minute candles for BINANCE_SYMBOL
+    and populate arrays so calculations can start immediately.
+    """
+    logging.info("Initializing historical data from Binance REST API...")
+
+    try:
+        bars = binance_client.get_klines(
+            symbol=BINANCE_SYMBOL,
+            interval=BINANCE_INTERVAL,
+            limit=100
+        )
+        for bar in bars:
+            open_time = bar[0]
+            high_val = float(bar[2])
+            low_val = float(bar[3])
+            close_val = float(bar[4])
+
+            time_array.append(open_time)
+            high_array.append(high_val)
+            low_array.append(low_val)
+            close_array.append(close_val)
+
+        # Trim arrays to MAX_CANDLES if needed
+        while len(time_array) > MAX_CANDLES:
+            time_array.pop(0)
+            high_array.pop(0)
+            low_array.pop(0)
+            close_array.pop(0)
+
+        # Compute ATR if we have enough data
+        if len(close_array) > ATR_LEN:
+            new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
+            atr_array.clear()
+            atr_array.extend(new_atr)
+        else:
+            atr_array.clear()
+            atr_array.extend([None]*len(close_array))
+
+        # Keep cluster_assignments in sync
+        while len(cluster_assignments) < len(close_array):
+            cluster_assignments.append(None)
+        while len(cluster_assignments) > len(close_array):
+            cluster_assignments.pop(0)
+
+        logging.info(
+            f"Historical data initialized with {len(close_array)} bars. "
+            f"Latest close price: {close_array[-1] if close_array else 'N/A'}"
+        )
+
+        # Optionally run K-Means now if we have at least TRAINING_DATA_PERIOD bars
+        data_count = len(close_array)
+        if data_count >= TRAINING_DATA_PERIOD:
+            vol_data = [x for x in atr_array[data_count - TRAINING_DATA_PERIOD:] if x is not None]
+            if len(vol_data) == TRAINING_DATA_PERIOD:
+                logging.info("Running initial K-Means on historical data...")
+                upper_val = max(vol_data)
+                lower_val = min(vol_data)
+                hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
+                mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
+                lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
+
+                global hv_new, mv_new, lv_new
+                hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                hv_new, mv_new, lv_new = hvf, mvf, lvf
+                logging.info(
+                    f"Initial K-Means from historical data: "
+                    f"HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}"
+                )
+
+    except Exception as e:
+        logging.error(f"Error initializing historical data: {e}", exc_info=True)
+
+##########################################
+# SUPER TREND / TRADING LOGIC
+##########################################
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
     with lock:
         length = len(close_array)
@@ -268,6 +348,9 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
     except Exception as e:
         logging.error(f"Alpaca order failed: {e}", exc_info=True)
 
+##########################################
+# THREADS: HEARTBEAT & SIGNAL CHECK
+##########################################
 def heartbeat_logging():
     global last_heartbeat_time
     print("Heartbeat thread starting...")
@@ -329,7 +412,6 @@ def check_signals():
                 length = len(close_array)
                 if length > 0:
                     i = length - 1
-
                     p_dir = primary_direction[i] if i < len(primary_direction) else None
                     s_dir = secondary_direction[i] if i < len(secondary_direction) else None
                     c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
@@ -345,7 +427,7 @@ def check_signals():
                         current_price = close_array[i]
 
                         # LONG ENTRY
-                        if (not in_position 
+                        if (not in_position
                             and bullish_bearish_bullish
                             and p_dir == 1
                             and c_idx == 0):
@@ -403,6 +485,9 @@ def check_signals():
             logging.error(f"Error in check_signals: {e}", exc_info=True)
         time.sleep(SIGNAL_CHECK_INTERVAL)
 
+##########################################
+# WEBSOCKET CALLBACK
+##########################################
 def on_message_candle(msg):
     global hv_new, mv_new, lv_new
     try:
@@ -449,7 +534,6 @@ def on_message_candle(msg):
                 while len(cluster_assignments) > len(close_array):
                     cluster_assignments.pop(0)
 
-                # Fix arrays for primary/secondary supertrend
                 def fix_arrays(st, di, ub, lb):
                     needed_len = len(close_array)
                     while len(st) < needed_len:
@@ -494,7 +578,6 @@ def on_message_candle(msg):
                 i = len(close_array) - 1
                 assigned_centroid = None
                 vol = atr_array[i] if i < len(atr_array) else None
-
                 if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
                     dA = abs(vol - hv_new)
                     dB = abs(vol - mv_new)
@@ -525,6 +608,9 @@ def on_message_candle(msg):
     except Exception as e:
         logging.error(f"Error in on_message_candle: {e}", exc_info=True)
 
+##########################################
+# START THE BINANCE WEBSOCKET
+##########################################
 def start_binance_websocket():
     """
     Start Binance WebSocket without manual ping/pong.
@@ -549,7 +635,7 @@ def start_binance_websocket():
 
             # Block here and keep the WebSocket alive
             logging.info("WebSocket is now running. Waiting for data...")
-            twm.join()  # twm.join() will block until error or shutdown
+            twm.join()  # Will block until an error or shutdown
 
         except Exception as e:
             logging.error(f"WebSocket error: {e}. Reconnecting in 30 seconds...")
@@ -559,6 +645,9 @@ def start_binance_websocket():
 # MAIN
 ##########################################
 if __name__ == "__main__":
+    logging.info("Fetching initial historical data for warmup...")
+    initialize_historical_data()  # <<--- This populates arrays from Binance REST
+
     print("Main function start: Starting threads...")
     logging.info("Starting heartbeat and signals threads.")
 
@@ -570,9 +659,5 @@ if __name__ == "__main__":
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
 
-    # Run as a background worker: No port binding needed.
     # Start the Binance WebSocket in the main thread (blocking).
     start_binance_websocket()
-
-
-
