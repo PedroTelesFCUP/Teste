@@ -1,11 +1,5 @@
-flask
 alpaca-trade-api
 pandas
 numpy
 python-binance
-scikit-learn
-dash
-dash-core-components
-dash-html-components
-dash-table
-plotly
+
