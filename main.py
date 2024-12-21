@@ -383,6 +383,8 @@ def check_signals():
 
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
+    global hv_new, mv_new, lv_new  # Must come before any reference to hv_new, mv_new, lv_new
+
     if 'k' not in msg:
         return
     k = msg['k']
