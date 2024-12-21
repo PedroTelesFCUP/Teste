@@ -266,35 +266,39 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
 
 def heartbeat_logging():
     global last_heartbeat_time
+    logging.info("Heartbeat thread started...")
     while True:
-        now = time.time()
-        if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
-            with lock:
-                if len(close_array) == 0:
-                    logging.info("No data yet.")
-                else:
-                    i = len(close_array)-1
-                    msg = "\n=== Heartbeat ===\n"
-                    msg += f"Last Price: {close_array[i]:.2f}\n"
-                    p_dir = primary_direction[i] if i<len(primary_direction) else None
-                    s_dir = secondary_direction[i] if i<len(secondary_direction) else None
-                    c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
-                    msg += f"Primary Dir: {p_dir}\n"
-                    msg += f"Secondary Dir: {s_dir}\n"
-                    msg += f"Cluster: {c_idx if c_idx is not None else 'None'} (0=High,1=Med,2=Low)\n"
-                    last_atr = atr_array[i] if i<len(atr_array) else None
-                    msg += f"ATR: {last_atr if last_atr is not None else 'N/A'}\n"
-                    pri_st = primary_supertrend[i] if i<len(primary_supertrend) else None
-                    sec_st = secondary_supertrend[i] if i<len(secondary_supertrend) else None
-                    msg += f"PriST: {pri_st if pri_st else 'N/A'}\n"
-                    msg += f"SecST: {sec_st if sec_st else 'N/A'}\n"
-                    msg += f"In Position: {in_position} ({position_side})\n"
-                    msg += f"Entry Price: {entry_price}\n"
-                    msg +=   "=============="
-                    logging.info(msg)
-            last_heartbeat_time = now
-        time.sleep(1)
-
+        Try:
+            now = time.time()
+            if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+                with lock:
+                    if len(close_array) == 0:
+                        logging.info("No data yet.")
+                    else:
+                        i = len(close_array)-1
+                        msg = "\n=== Heartbeat ===\n"
+                        msg += f"Last Price: {close_array[i]:.2f}\n"
+                        p_dir = primary_direction[i] if i<len(primary_direction) else None
+                        s_dir = secondary_direction[i] if i<len(secondary_direction) else None
+                        c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
+                        msg += f"Primary Dir: {p_dir}\n"
+                        msg += f"Secondary Dir: {s_dir}\n"
+                        msg += f"Cluster: {c_idx if c_idx is not None else 'None'} (0=High,1=Med,2=Low)\n"
+                        last_atr = atr_array[i] if i<len(atr_array) else None
+                        msg += f"ATR: {last_atr if last_atr is not None else 'N/A'}\n"
+                        pri_st = primary_supertrend[i] if i<len(primary_supertrend) else None
+                        sec_st = secondary_supertrend[i] if i<len(secondary_supertrend) else None
+                        msg += f"PriST: {pri_st if pri_st else 'N/A'}\n"
+                        msg += f"SecST: {sec_st if sec_st else 'N/A'}\n"
+                        msg += f"In Position: {in_position} ({position_side})\n"
+                        msg += f"Entry Price: {entry_price}\n"
+                        msg +=   "=============="
+                        logging.info(msg)
+                last_heartbeat_time = now
+            time.sleep(1)
+        except Exception as e:
+            logging.error(f"Error in heartbeat: {e}", exc_info=True)
+            time.sleep(1)
 def check_signals():
     global in_position, position_side, entry_price
     while True:
@@ -615,13 +619,13 @@ def run_dashboard():
 ##########################################
 if __name__ == "__main__":
     # Start threads
-    hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
+    hb_thread = threading.Thread(target=heartbeat_logging)
     hb_thread.start()
 
-    signal_thread = threading.Thread(target=check_signals, daemon=True)
+    signal_thread = threading.Thread(target=check_signals)
     signal_thread.start()
 
-    dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+    dashboard_thread = threading.Thread(target=run_dashboard)
     dashboard_thread.start()
 
     # Start Binance WebSocket - blocking call
