@@ -33,9 +33,11 @@ ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
 SYMBOL_ALPACA = "BTCUSD"
 QTY = 0.001
 
+# Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
 BINANCE_INTERVAL = "1m"
 
+# Strategy / logic parameters
 ATR_LEN = 10
 PRIMARY_FACTOR = 3.0
 SECONDARY_FACTOR = 8.0
@@ -44,11 +46,14 @@ HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
+# Heartbeat & signal intervals
 HEARTBEAT_INTERVAL = 30
 SIGNAL_CHECK_INTERVAL = 1
-START_TIME = datetime(2024, 12, 1, 9, 30).timestamp() * 1000
-END_TIME = datetime(2024, 12, 17, 16, 0).timestamp() * 1000
+
+# We keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 100
+
+# If True, run K-Means once after we get enough data
 CLUSTER_RUN_ONCE = True
 
 # Globals
@@ -88,7 +93,7 @@ sell_signals = []
 last_heartbeat_time = 0
 lock = threading.Lock()
 
-print("Global variables initialized.")
+print("Global variables initialized. (Running as a background worker or standalone script.)")
 
 ##########################################
 # HELPER FUNCTIONS
@@ -97,21 +102,26 @@ def wilder_smoothing(values, period):
     clean_values = [v for v in values if v is not None]
     if len(clean_values) < period:
         return [None]*len(values)
+
     start_index = 0
-    for idx,v in enumerate(values):
+    for idx, v in enumerate(values):
         if v is not None:
             start_index = idx
             break
+
     length = len(values)
     result = [None]*length
     if length - start_index < period:
         return result
+
     window = values[start_index:start_index+period]
     if any(x is None for x in window):
         return result
-    atr_val = sum(window)/period
-    result[start_index+period-1] = atr_val
-    for i in range(start_index+period, length):
+
+    atr_val = sum(window) / period
+    result[start_index + period - 1] = atr_val
+
+    for i in range(start_index + period, length):
         if values[i] is None or result[i-1] is None:
             result[i] = None
         else:
@@ -124,15 +134,17 @@ def compute_atr(h_array, l_array, c_array, period):
     length = len(c_array)
     if length <= period:
         return [None]*length
+
     tr_list = [None]*length
     for i in range(length):
         if i == 0:
             tr_list[i] = None
         else:
             t1 = h_array[i] - l_array[i]
-            t2 = abs(h_array[i]-c_array[i-1])
-            t3 = abs(l_array[i]-c_array[i-1])
-            tr_list[i] = max(t1,t2,t3)
+            t2 = abs(h_array[i] - c_array[i-1])
+            t3 = abs(l_array[i] - c_array[i-1])
+            tr_list[i] = max(t1, t2, t3)
+
     return wilder_smoothing(tr_list, period)
 
 def run_kmeans(vol_data, hv_init, mv_init, lv_init):
@@ -141,7 +153,7 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
     cmean = [lv_init]
 
     def means_stable(m):
-        if len(m)<2:
+        if len(m) < 2:
             return False
         return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
 
@@ -184,13 +196,14 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
     with lock:
         length = len(close_array)
-        if i<0 or i>=length:
+        if i < 0 or i >= length:
             return
+
         if assigned_atr is None:
-            st_array[i] = st_array[i-1] if i>0 else None
-            dir_array[i] = dir_array[i-1] if i>0 else 1
-            ub_array[i] = ub_array[i-1] if i>0 else None
-            lb_array[i] = lb_array[i-1] if i>0 else None
+            st_array[i] = st_array[i-1] if i > 0 else None
+            dir_array[i] = dir_array[i-1] if i > 0 else 1
+            ub_array[i] = ub_array[i-1] if i > 0 else None
+            lb_array[i] = lb_array[i-1] if i > 0 else None
             return
 
         hl2 = (high_array[i] + low_array[i]) / 2.0
@@ -208,12 +221,12 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
         prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-        if (downBand > prevLB or close_array[i-1]<prevLB):
+        if (downBand > prevLB or close_array[i-1] < prevLB):
             downBand = downBand
         else:
             downBand = prevLB
 
-        if (upBand < prevUB or close_array[i-1]>prevUB):
+        if (upBand < prevUB or close_array[i-1] > prevUB):
             upBand = upBand
         else:
             upBand = prevUB
@@ -259,6 +272,7 @@ def heartbeat_logging():
     global last_heartbeat_time
     print("Heartbeat thread starting...")
     logging.info("Heartbeat thread started...")
+
     while True:
         try:
             now = time.time()
@@ -267,15 +281,16 @@ def heartbeat_logging():
                     if len(close_array) == 0:
                         logging.info("No data yet.")
                     else:
-                        i = len(close_array)-1
-                        p_dir = primary_direction[i] if i<len(primary_direction) else None
-                        s_dir = secondary_direction[i] if i<len(secondary_direction) else None
-                        c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
+                        i = len(close_array) - 1
+                        p_dir = primary_direction[i] if i < len(primary_direction) else None
+                        s_dir = secondary_direction[i] if i < len(secondary_direction) else None
+                        c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
                         assigned_centroid = None
                         if c_idx is not None and hv_new is not None and mv_new is not None and lv_new is not None:
                             assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-                        pri_st = primary_supertrend[i] if i<len(primary_supertrend) else None
-                        sec_st = secondary_supertrend[i] if i<len(secondary_supertrend) else None
+
+                        pri_st = primary_supertrend[i] if i < len(primary_supertrend) else None
+                        sec_st = secondary_supertrend[i] if i < len(secondary_supertrend) else None
 
                         msg = "\n=== Heartbeat ===\n"
                         msg += f"Last Price: {close_array[i]:.2f}\n"
@@ -307,79 +322,82 @@ def check_signals():
     global in_position, position_side, entry_price
     print("Signal checking thread starting...")
     logging.info("Signal checking thread started...")
+
     while True:
         try:
             with lock:
                 length = len(close_array)
                 if length > 0:
-                    i = length-1
-                    t = time_array[i]
-                    if t < START_TIME or t > END_TIME:
-                        if in_position:
-                            logging.info("Outside trading window. Closing position.")
+                    i = length - 1
+
+                    p_dir = primary_direction[i] if i < len(primary_direction) else None
+                    s_dir = secondary_direction[i] if i < len(secondary_direction) else None
+                    c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
+
+                    if (p_dir is not None
+                        and s_dir is not None
+                        and c_idx is not None
+                        and len(last_secondary_directions) >= 3):
+
+                        recent_3 = last_secondary_directions[-3:]
+                        bullish_bearish_bullish = (recent_3 == [1, -1, 1])
+                        bearish_bullish_bearish = (recent_3 == [-1, 1, -1])
+                        current_price = close_array[i]
+
+                        # LONG ENTRY
+                        if (not in_position 
+                            and bullish_bearish_bullish
+                            and p_dir == 1
+                            and c_idx == 0):
+                            sl = low_array[i]
+                            dist = current_price - sl
+                            tp = current_price + (1.5 * dist)
+                            logging.info("Pullback BUY triggered!")
+                            execute_trade(
+                                side="buy",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "long"
+                            entry_price = current_price
+
+                        # SHORT ENTRY
+                        if (not in_position
+                            and bearish_bearish_bearish
+                            and p_dir == -1
+                            and c_idx == 0):
+                            sl = high_array[i]
+                            dist = sl - current_price
+                            tp = current_price - (1.5 * dist)
+                            logging.info("Pullback SHORT triggered!")
+                            execute_trade(
+                                side="sell",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "short"
+                            entry_price = current_price
+
+                        # EXIT LOGIC
+                        if in_position and position_side == "long" and p_dir == -1:
+                            logging.info("Primary turned bearish. Closing LONG.")
                             execute_trade("sell", QTY, SYMBOL_ALPACA)
                             in_position = False
                             position_side = None
                             entry_price = None
-                    else:
-                        p_dir = primary_direction[i] if i<len(primary_direction) else None
-                        s_dir = secondary_direction[i] if i<len(secondary_direction) else None
-                        c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
 
-                        if p_dir is not None and s_dir is not None and c_idx is not None and len(last_secondary_directions)>=3:
-                            recent_3 = last_secondary_directions[-3:]
-                            bullish_bearish_bullish = (recent_3 == [1, -1, 1])
-                            bearish_bullish_bearish = (recent_3 == [-1, 1, -1])
-                            current_price = close_array[i]
-
-                            # LONG ENTRY
-                            if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
-                                sl = low_array[i]
-                                dist = current_price - sl
-                                tp = current_price + (1.5 * dist)
-                                logging.info("Pullback BUY triggered!")
-                                execute_trade(
-                                    side="buy",
-                                    qty=QTY,
-                                    symbol=SYMBOL_ALPACA,
-                                    stop_loss=round(sl, 2),
-                                    take_profit=round(tp, 2)
-                                )
-                                in_position = True
-                                position_side = "long"
-                                entry_price = current_price
-
-                            # SHORT ENTRY
-                            if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
-                                sl = high_array[i]
-                                dist = sl - current_price
-                                tp = current_price - (1.5 * dist)
-                                logging.info("Pullback SHORT triggered!")
-                                execute_trade(
-                                    side="sell",
-                                    qty=QTY,
-                                    symbol=SYMBOL_ALPACA,
-                                    stop_loss=round(sl, 2),
-                                    take_profit=round(tp, 2)
-                                )
-                                in_position = True
-                                position_side = "short"
-                                entry_price = current_price
-
-                            # EXIT LOGIC
-                            if in_position and position_side == "long" and p_dir == -1:
-                                logging.info("Primary turned bearish. Closing LONG.")
-                                execute_trade("sell", QTY, SYMBOL_ALPACA)
-                                in_position = False
-                                position_side = None
-                                entry_price = None
-
-                            if in_position and position_side == "short" and p_dir == 1:
-                                logging.info("Primary turned bullish. Closing SHORT.")
-                                execute_trade("buy", QTY, SYMBOL_ALPACA)
-                                in_position = False
-                                position_side = None
-                                entry_price = None
+                        if in_position and position_side == "short" and p_dir == 1:
+                            logging.info("Primary turned bullish. Closing SHORT.")
+                            execute_trade("buy", QTY, SYMBOL_ALPACA)
+                            in_position = False
+                            position_side = None
+                            entry_price = None
 
         except Exception as e:
             logging.error(f"Error in check_signals: {e}", exc_info=True)
@@ -390,6 +408,7 @@ def on_message_candle(msg):
     try:
         if 'k' not in msg:
             return
+
         k = msg['k']
         is_final = k['x']
         close_price = float(k['c'])
@@ -398,18 +417,22 @@ def on_message_candle(msg):
         open_time = k['t']
 
         if is_final:
+            logging.info("on_message_candle: Candle is final. Appending new bar...")
+
             with lock:
                 time_array.append(open_time)
                 high_array.append(high_price)
                 low_array.append(low_price)
                 close_array.append(close_price)
 
+                # Trim arrays
                 while len(time_array) > MAX_CANDLES:
                     time_array.pop(0)
                     high_array.pop(0)
                     low_array.pop(0)
                     close_array.pop(0)
 
+                # ATR
                 if len(close_array) > ATR_LEN:
                     new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
                     atr_array.clear()
@@ -426,6 +449,7 @@ def on_message_candle(msg):
                 while len(cluster_assignments) > len(close_array):
                     cluster_assignments.pop(0)
 
+                # Fix arrays for primary/secondary supertrend
                 def fix_arrays(st, di, ub, lb):
                     needed_len = len(close_array)
                     while len(st) < needed_len:
@@ -445,13 +469,18 @@ def on_message_candle(msg):
                     while len(lb) > needed_len:
                         lb.pop(0)
 
-                fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
-                fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+                fix_arrays(primary_supertrend, primary_direction,
+                           primary_upperBand, primary_lowerBand)
+                fix_arrays(secondary_supertrend, secondary_direction,
+                           secondary_upperBand, secondary_lowerBand)
 
                 data_count = len(close_array)
+
+                # Run K-means if we have enough bars
                 if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
                     vol_data = [x for x in atr_array[data_count-TRAINING_DATA_PERIOD:] if x is not None]
                     if len(vol_data) == TRAINING_DATA_PERIOD:
+                        logging.info("Running K-Means on last TRAINING_DATA_PERIOD ATR values...")
                         upper_val = max(vol_data)
                         lower_val = min(vol_data)
                         hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
@@ -462,9 +491,10 @@ def on_message_candle(msg):
                         hv_new, mv_new, lv_new = hvf, mvf, lvf
                         logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
 
-                i = len(close_array)-1
+                i = len(close_array) - 1
                 assigned_centroid = None
-                vol = atr_array[i] if i<len(atr_array) else None
+                vol = atr_array[i] if i < len(atr_array) else None
+
                 if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
                     dA = abs(vol - hv_new)
                     dB = abs(vol - mv_new)
@@ -474,6 +504,7 @@ def on_message_candle(msg):
                     cluster_assignments[i] = c_idx
                     assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
 
+                # Compute supertrend for primary and secondary
                 compute_supertrend(
                     i, PRIMARY_FACTOR, assigned_centroid,
                     primary_supertrend, primary_direction,
@@ -485,21 +516,23 @@ def on_message_candle(msg):
                     secondary_upperBand, secondary_lowerBand
                 )
 
-                if i<len(secondary_direction) and secondary_direction[i] is not None:
+                # Update secondary directions for pattern detection
+                if i < len(secondary_direction) and secondary_direction[i] is not None:
                     last_secondary_directions.append(secondary_direction[i])
                     if len(last_secondary_directions) > 10:
                         last_secondary_directions.pop(0)
 
     except Exception as e:
         logging.error(f"Error in on_message_candle: {e}", exc_info=True)
+
 def start_binance_websocket():
     """
     Start Binance WebSocket without manual ping/pong.
-    If an error occurs, it waits 30 seconds and retries.
+    If an error occurs, wait 30 seconds and retry.
     """
     while True:
         try:
-            logging.info("Starting Binance WebSocket...")
+            logging.info("Starting Binance WebSocket (background worker).")
             twm = ThreadedWebsocketManager(
                 api_key=BINANCE_API_KEY,
                 api_secret=BINANCE_SECRET_KEY
@@ -507,6 +540,7 @@ def start_binance_websocket():
             twm.start()
 
             # Start the kline socket for the specified symbol/interval
+            logging.info(f"Subscribing to {BINANCE_SYMBOL} {BINANCE_INTERVAL} kline stream.")
             twm.start_kline_socket(
                 callback=on_message_candle,
                 symbol=BINANCE_SYMBOL.lower(),
@@ -514,13 +548,12 @@ def start_binance_websocket():
             )
 
             # Block here and keep the WebSocket alive
-            logging.info("Binance WebSocket is now running. Waiting for data...")
-            twm.join()  # twm.join() will block until an error or shutdown
+            logging.info("WebSocket is now running. Waiting for data...")
+            twm.join()  # twm.join() will block until error or shutdown
 
         except Exception as e:
             logging.error(f"WebSocket error: {e}. Reconnecting in 30 seconds...")
             time.sleep(30)  # Wait before reconnecting
-
 
 ##########################################
 # MAIN
@@ -529,14 +562,17 @@ if __name__ == "__main__":
     print("Main function start: Starting threads...")
     logging.info("Starting heartbeat and signals threads.")
 
+    # Start heartbeat thread
     hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
     hb_thread.start()
 
+    # Start signal checking thread
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
 
-    # No dashboard, no server. Running as a background worker on Render.
-    # Start binance websocket (blocking)
+    # Run as a background worker: No port binding needed.
+    # Start the Binance WebSocket in the main thread (blocking).
     start_binance_websocket()
+
 
 
