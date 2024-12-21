@@ -2,4 +2,4 @@ alpaca-trade-api
 pandas
 numpy
 python-binance
-
+scikit-learn
