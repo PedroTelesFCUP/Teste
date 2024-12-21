@@ -740,120 +740,119 @@ def on_message_candle(msg):
         low_price = float(k['l'])
         open_time = k['t']
 
-        if is_final:
-            logger.info("on_message_candle: Candle is final. Appending new bar...")
 
-            with lock:
-                # Append new candle data
-                time_array.append(open_time)
-                high_array.append(high_price)
-                low_array.append(low_price)
-                close_array.append(close_price)
+        with lock:
+            # Append new candle data
+            time_array.append(open_time)
+            high_array.append(high_price)
+            low_array.append(low_price)
+            close_array.append(close_price)
 
-                # Trim arrays to maintain MAX_CANDLES
-                while len(time_array) > MAX_CANDLES:
-                    time_array.pop(0)
-                    high_array.pop(0)
-                    low_array.pop(0)
-                    close_array.pop(0)
-                    atr_array.pop(0)
-                    cluster_assignments_primary.pop(0)
-                    cluster_assignments_secondary.pop(0)
-                    primary_supertrend.pop(0)
-                    primary_direction.pop(0)
-                    primary_upperBand.pop(0)
-                    primary_lowerBand.pop(0)
-                    secondary_supertrend.pop(0)
-                    secondary_direction.pop(0)
-                    secondary_upperBand.pop(0)
-                    secondary_lowerBand.pop(0)
+            # Trim arrays to maintain MAX_CANDLES
+            while len(time_array) > MAX_CANDLES:
+                time_array.pop(0)
+                high_array.pop(0)
+                low_array.pop(0)
+                close_array.pop(0)
+                atr_array.pop(0)
+                cluster_assignments_primary.pop(0)
+                cluster_assignments_secondary.pop(0)
+                primary_supertrend.pop(0)
+                primary_direction.pop(0)
+                primary_upperBand.pop(0)
+                primary_lowerBand.pop(0)
+                secondary_supertrend.pop(0)
+                secondary_direction.pop(0)
+                secondary_upperBand.pop(0)
+                secondary_lowerBand.pop(0)
 
-                # Compute ATR
-                if len(close_array) >= ATR_LEN:
-                    new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-                    atr_array.clear()
-                    atr_array.extend(new_atr)
-                    logger.debug(f"Computed ATR: {atr_array[-5:]}")
-                else:
-                    atr_array.clear()
-                    atr_array.extend([None] * len(close_array))  # Use None for insufficient data
-                    logger.debug("Not enough data to compute ATR.")
+            # Compute ATR
+            if len(close_array) >= ATR_LEN:
+                new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
+                atr_array.clear()
+                atr_array.extend(new_atr)
+                logger.debug(f"Computed ATR: {atr_array[-5:]}")
+            else:
+                atr_array.clear()
+                atr_array.extend([None] * len(close_array))  # Use None for insufficient data
+                logger.debug("Not enough data to compute ATR.")
 
-                # Sync cluster_assignments_primary and cluster_assignments_secondary with close_array
-                while len(cluster_assignments_primary) < len(close_array):
-                    cluster_assignments_primary.append(None)
-                while len(cluster_assignments_primary) > len(close_array):
-                    cluster_assignments_primary.pop(0)
+            # Sync cluster_assignments_primary and cluster_assignments_secondary with close_array
+            while len(cluster_assignments_primary) < len(close_array):
+                cluster_assignments_primary.append(None)
+            while len(cluster_assignments_primary) > len(close_array):
+                cluster_assignments_primary.pop(0)
 
-                while len(cluster_assignments_secondary) < len(close_array):
-                    cluster_assignments_secondary.append(None)
-                while len(cluster_assignments_secondary) > len(close_array):
-                    cluster_assignments_secondary.pop(0)
+            while len(cluster_assignments_secondary) < len(close_array):
+                cluster_assignments_secondary.append(None)
+            while len(cluster_assignments_secondary) > len(close_array):
+                cluster_assignments_secondary.pop(0)
 
-                # Ensure SuperTrend arrays are synchronized
-                def fix_arrays(st, di, ub, lb):
-                    needed_len = len(close_array)
-                    while len(st) < needed_len:
-                        st.append(None)
-                    while len(st) > needed_len:
-                        st.pop(0)
-                    while len(di) < needed_len:
-                        di.append(1)  # Initialize with 1 (Bullish)
-                    while len(di) > needed_len:
-                        di.pop(0)
-                    while len(ub) < needed_len:
-                        ub.append(None)
-                    while len(ub) > needed_len:
-                        ub.pop(0)
-                    while len(lb) < needed_len:
-                        lb.append(None)
-                    while len(lb) > needed_len:
-                        lb.pop(0)
+            # Ensure SuperTrend arrays are synchronized
+            def fix_arrays(st, di, ub, lb):
+                needed_len = len(close_array)
+                while len(st) < needed_len:
+                    st.append(None)
+                while len(st) > needed_len:
+                    st.pop(0)
+                while len(di) < needed_len:
+                    di.append(1)  # Initialize with 1 (Bullish)
+                while len(di) > needed_len:
+                    di.pop(0)
+                while len(ub) < needed_len:
+                    ub.append(None)
+                while len(ub) > needed_len:
+                    ub.pop(0)
+                while len(lb) < needed_len:
+                    lb.append(None)
+                while len(lb) > needed_len:
+                    lb.pop(0)
 
-                fix_arrays(primary_supertrend, primary_direction,
-                           primary_upperBand, primary_lowerBand)
-                fix_arrays(secondary_supertrend, secondary_direction,
-                           secondary_upperBand, secondary_lowerBand)
+            fix_arrays(primary_supertrend, primary_direction,
+                       primary_upperBand, primary_lowerBand)
+            fix_arrays(secondary_supertrend, secondary_direction,
+                       secondary_upperBand, secondary_lowerBand)
 
-                data_count = len(close_array)
+            data_count = len(close_array)
 
-                # Assign cluster and compute SuperTrend for Primary SuperTrend
-                if hv_new_primary and mv_new_primary and lv_new_primary and atr_array[-1] is not None:
-                    vol_primary = atr_array[-1]
-                    distances_primary = [abs(vol_primary - hv_new_primary), abs(vol_primary - mv_new_primary), abs(vol_primary - lv_new_primary)]
-                    c_idx_primary = distances_primary.index(min(distances_primary))
-                    cluster_assignments_primary[-1] = c_idx_primary
-                    assigned_centroid_primary = [lv_new_primary, mv_new_primary, hv_new_primary][c_idx_primary]
-                    # Compute SuperTrend without direct direction assignment
-                    compute_supertrend(
-                        i=data_count - 1,
-                        factor=PRIMARY_FACTOR,
-                        assigned_atr=assigned_centroid_primary,
-                        st_array=primary_supertrend,
-                        dir_array=primary_direction,
-                        ub_array=primary_upperBand,
-                        lb_array=primary_lowerBand
-                    )
-                    logger.debug(f"Primary SuperTrend updated for index {data_count - 1}")
+            # Assign cluster and compute SuperTrend for Primary SuperTrend
+            if hv_new_primary and mv_new_primary and lv_new_primary and atr_array[-1] is not None:
+                vol_primary = atr_array[-1]
+                distances_primary = [abs(vol_primary - hv_new_primary), abs(vol_primary - mv_new_primary), abs(vol_primary - lv_new_primary)]
+                c_idx_primary = distances_primary.index(min(distances_primary))
+                cluster_assignments_primary[-1] = c_idx_primary
+                assigned_centroid_primary = [lv_new_primary, mv_new_primary, hv_new_primary][c_idx_primary]
+                # Compute SuperTrend without direct direction assignment
+                compute_supertrend(
+                    i=data_count - 1,
+                    factor=PRIMARY_FACTOR,
+                    assigned_atr=assigned_centroid_primary,
+                    st_array=primary_supertrend,
+                    dir_array=primary_direction,
+                    ub_array=primary_upperBand,
+                    lb_array=primary_lowerBand
+                )
+                logger.debug(f"Primary SuperTrend updated for index {data_count - 1}")
 
-                # Assign cluster and compute SuperTrend for Secondary SuperTrend
-                if hv_new_secondary and mv_new_secondary and lv_new_secondary and atr_array[-1] is not None:
-                    vol_secondary = atr_array[-1]
-                    distances_secondary = [abs(vol_secondary - hv_new_secondary), abs(vol_secondary - mv_new_secondary), abs(vol_secondary - lv_new_secondary)]
-                    c_idx_secondary = distances_secondary.index(min(distances_secondary))
-                    cluster_assignments_secondary[-1] = c_idx_secondary
-                    assigned_centroid_secondary = [lv_new_secondary, mv_new_secondary, hv_new_secondary][c_idx_secondary]
-                    # Compute SuperTrend without direct direction assignment
-                    compute_supertrend(
-                        i=data_count - 1,
-                        factor=SECONDARY_FACTOR,
-                        assigned_atr=assigned_centroid_secondary,
-                        st_array=secondary_supertrend,
-                        dir_array=secondary_direction,
-                        ub_array=secondary_upperBand,
-                        lb_array=secondary_lowerBand
-                    )
-                    logger.debug(f"Secondary SuperTrend updated for index {data_count - 1}")
+            # Assign cluster and compute SuperTrend for Secondary SuperTrend
+            if hv_new_secondary and mv_new_secondary and lv_new_secondary and atr_array[-1] is not None:
+                vol_secondary = atr_array[-1]
+                distances_secondary = [abs(vol_secondary - hv_new_secondary), abs(vol_secondary - mv_new_secondary), abs(vol_secondary - lv_new_secondary)]
+                c_idx_secondary = distances_secondary.index(min(distances_secondary))
+                cluster_assignments_secondary[-1] = c_idx_secondary
+                assigned_centroid_secondary = [lv_new_secondary, mv_new_secondary, hv_new_secondary][c_idx_secondary]
+                # Compute SuperTrend without direct direction assignment
+                compute_supertrend(
+                    i=data_count - 1,
+                    factor=SECONDARY_FACTOR,
+                    assigned_atr=assigned_centroid_secondary,
+                    st_array=secondary_supertrend,
+                    dir_array=secondary_direction,
+                    ub_array=secondary_upperBand,
+                    lb_array=secondary_lowerBand
+                )
+                logger.debug(f"Secondary SuperTrend updated for index {data_count - 1}")
+
     except Exception as e:
         logger.error(f"SuperTrend calculation failed: {e}", exc_info=True)
 
