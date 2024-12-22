@@ -155,6 +155,9 @@ last_heartbeat_time = 0
 # Threading lock for thread-safe operations
 lock = threading.Lock()
 
+# Flask Server
+app = Flask(__name__)
+
 @app.route("/")
 def home():
     return "Bot is working"
