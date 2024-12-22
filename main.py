@@ -295,16 +295,6 @@ def check_signals():
             i = len(close_array)-1
             t = time_array[i]
 
-            # Flatten position if outside time window
-            if t < START_TIME or t > END_TIME:
-                if in_position:
-                    logging.info("Outside trading window. Closing position.")
-                    execute_trade("sell", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    position_side = None
-                    entry_price = None
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
 
             # Gather signals
             p_dir = primary_direction[i]
