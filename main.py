@@ -4,7 +4,7 @@ import time
 import logging
 import threading
 from datetime import datetime
-from flask import Flask, send_file
+
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
@@ -12,13 +12,12 @@ from sklearn.cluster import KMeans
 import numpy as np
 
 from logging.handlers import RotatingFileHandler
+from flask import Flask, send_file
 
 ##########################################
 # CONFIGURATION & LOGGING
 ##########################################
 print("Main script start: Initializing logging...")
-
-
 
 # Define log filename with timestamp to avoid overwriting
 log_filename = os.path.join(f"trading_bot_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
@@ -150,8 +149,8 @@ def home():
 @app.route('/logs')
 def download_logs():
     try:
-        # Use the absolute path to ensure correct file location
-        return send_file(f"trading_bot_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log", as_attachment=True)
+        # Use the stored log_filename
+        return send_file(log_filename, as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
 
@@ -283,15 +282,13 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
             downBand = hl2 - factor * assigned_atr
 
             if i == 0:
-                # Calculate mean of historical close prices
-                mean_close = np.mean(close_array)
-                current_mid = hl2
-                direction = 1 if mean_close > current_mid else -1
+                # Initialize direction to 1 (Bullish)
+                direction = 1
                 dir_array[i] = direction
                 st_array[i] = upBand if direction == 1 else downBand
                 ub_array[i] = upBand
                 lb_array[i] = downBand
-                logger.info(f"SuperTrend initialized at index {i}: Dir={direction}, ST={st_array[i]:.2f}, UB={upBand:.2f}, LB={downBand:.2f}")
+                logger.info(f"SuperTrend initialized at index {i}: Dir=1 (Bullish), ST={st_array[i]:.2f}, UB={upBand:.2f}, LB={downBand:.2f}")
                 return
 
             # Ensure previous index is within bounds
@@ -318,20 +315,20 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
                 if prevDir == 1:  # Previously Bullish
                     if close_array[i] < lb:
                         direction = -1  # Change to Bearish
-                        logger.info(f"Direction changed to Bearish at index {i} due to price below downBand.")
+                        logger.info(f"Direction changed to -1 (Bearish) at index {i} due to price below downBand.")
                     else:
                         direction = 1   # Continue Bullish
-                        logger.info(f"Direction remains Bullish at index {i}.")
+                        logger.info(f"Direction remains 1 (Bullish) at index {i}.")
                 elif prevDir == -1:  # Previously Bearish
                     if close_array[i] > ub:
                         direction = 1   # Change to Bullish
-                        logger.info(f"Direction changed to Bullish at index {i} due to price above upBand.")
+                        logger.info(f"Direction changed to 1 (Bullish) at index {i} due to price above upBand.")
                     else:
                         direction = -1  # Continue Bearish
-                        logger.info(f"Direction remains Bearish at index {i}.")
+                        logger.info(f"Direction remains -1 (Bearish) at index {i}.")
                 else:
                     direction = 1  # Default to Bullish if undefined
-                    logger.warning(f"Invalid previous direction {prevDir} at index {i-1}. Defaulting to Bullish.")
+                    logger.warning(f"Invalid previous direction {prevDir} at index {i-1}. Defaulting to 1 (Bullish).")
 
                 dir_array[i] = direction
                 st_array[i] = lb if direction == 1 else ub
@@ -418,15 +415,15 @@ def initialize_historical_data():
         secondary_upperBand.clear()
         secondary_lowerBand.clear()
 
-        # Pre-populate SuperTrend arrays with None
+        # Pre-populate SuperTrend arrays with default direction (1) # Initialize as Bullish
         for _ in close_array:
             primary_supertrend.append(None)
-            primary_direction.append(None)
+            primary_direction.append(1)  # Initialize with 1 (Bullish)
             primary_upperBand.append(None)
             primary_lowerBand.append(None)
 
             secondary_supertrend.append(None)
-            secondary_direction.append(None)
+            secondary_direction.append(1)  # Initialize with 1 (Bullish)
             secondary_upperBand.append(None)
             secondary_lowerBand.append(None)
 
@@ -588,8 +585,6 @@ def heartbeat_logging():
                         msg += f"Secondary Lower Band: {secondary_lowerBand[i] if i < len(secondary_lowerBand) else 'N/A'}\n"
                         msg += f"In Position: {in_position} ({position_side})\n"
                         msg += f"Entry Price: {entry_price}\n"
-                        msg += f"Primary Cluster Sizes: Low={cluster_assignments_primary.count(0)}, Med={cluster_assignments_primary.count(1)}, High={cluster_assignments_primary.count(2)}\n"
-                        msg += f"Secondary Cluster Sizes: Low={cluster_assignments_secondary.count(0)}, Med={cluster_assignments_secondary.count(1)}, High={cluster_assignments_secondary.count(2)}\n"
                         msg += "=============="
                         logger.info(msg)
 
