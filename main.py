@@ -507,16 +507,16 @@ def on_message_candle(msg):
         assigned_centroid = None
         vol = atr_array[i]
 
-        if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
-            dA = abs(vol - hv_new)
-            dB = abs(vol - mv_new)
-            dC = abs(vol - lv_new)
-            distances = [dA, dB, dC]
-            c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
-            cluster_assignments[i] = c_idx
-            assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-        else:
-            logging.warning("Assigned centroid is None. Skipping SuperTrend computation for this bar.")
+#        if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
+        dA = abs(vol - hv_new)
+        dB = abs(vol - mv_new)
+        dC = abs(vol - lv_new)
+        distances = [dA, dB, dC]
+        c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
+        cluster_assignments[i] = c_idx
+        assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+#        else:
+#            logging.warning("Assigned centroid is None. Skipping SuperTrend computation for this bar.")
 
         if assigned_centroid is not None:
             compute_supertrend(
