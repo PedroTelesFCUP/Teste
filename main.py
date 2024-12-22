@@ -353,22 +353,6 @@ def check_signals():
                     position_side = "short"
                     entry_price = current_price
 
-            # ============ EXIT LOGIC ============
-            # If we are long & primary flips to -1 => exit
-            if in_position and position_side == "long" and p_dir == -1:
-                logging.info("Primary turned bearish. Closing LONG.")
-                execute_trade("sell", QTY, SYMBOL_ALPACA)
-                in_position = False
-                position_side = None
-                entry_price = None
-
-            # If we are short & primary flips to +1 => exit
-            if in_position and position_side == "short" and p_dir == 1:
-                logging.info("Primary turned bullish. Closing SHORT.")
-                execute_trade("buy", QTY, SYMBOL_ALPACA)
-                in_position = False
-                position_side = None
-                entry_price = None
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
