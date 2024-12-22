@@ -19,7 +19,10 @@ LOG_LEVEL = logging.INFO
 logging.basicConfig(
     level=LOG_LEVEL,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[
+        logging.FileHandler("bot_logs.log"),  # Save logs to file
+        logging.StreamHandler(sys.stdout)              # Output logs to console
+
 )
 
 # Environment variables / credentials
@@ -106,7 +109,7 @@ def home():
 def download_logs():
     try:
         # Assuming logs are stored in the current directory
-        return send_file(log_filename, as_attachment=True)
+        return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
 
