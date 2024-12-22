@@ -4,7 +4,7 @@ import time
 import logging
 import threading
 from datetime import datetime
-
+from flask import Flask, send_file
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
