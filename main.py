@@ -1,146 +1,85 @@
 import os
 import sys
 import time
+import math
+import statistics
 import logging
 import threading
 from datetime import datetime
-import json
 
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
-from sklearn.cluster import KMeans
-import numpy as np
 
-
-from logging.handlers import RotatingFileHandler
+import plotly.graph_objs as go
+from dash import Dash, dcc, html
+from dash.dependencies import Input, Output
+from flask import Flask
 
 ##########################################
-# CONFIGURATION & LOGGING
+# CONFIGURATION
 ##########################################
-print("Main script start: Initializing logging...")
+LOG_LEVEL = logging.INFO
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
-# Define log directory and ensure it exists
-log_dir = "logs"
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "YOUR_BINANCE_API_KEY")
+BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "YOUR_BINANCE_SECRET_KEY")
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "YOUR_ALPACA_API_KEY")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "YOUR_ALPACA_SECRET_KEY")
 
-# Define log filename with timestamp to avoid overwriting
-log_filename = os.path.join(log_dir, f"trading_bot_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-
-# Create a logger
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logs during debugging
-
-# Create handlers
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)  # Adjust as needed
-
-# Create a rotating file handler to prevent large log files
-file_handler = RotatingFileHandler(log_filename, maxBytes=5*1024*1024, backupCount=5)  # 5MB per file, keep last 5
-file_handler.setLevel(logging.DEBUG)
-
-# Create formatters and add them to handlers
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-console_handler.setFormatter(formatter)
-file_handler.setFormatter(formatter)
-
-# Define the custom filter to exclude heartbeat messages from console
-class ExcludeHeartbeatFilter(logging.Filter):
-    def filter(self, record):
-        return not getattr(record, 'heartbeat', False)
-
-# Add custom filter to console_handler to exclude heartbeat messages
-console_handler.addFilter(ExcludeHeartbeatFilter())
-
-# Add handlers to the logger
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
-
-logger.info("Logging initialized. Logs will be saved to console and file.")
-logger.info(f"Log file: {log_filename}")
-
-# Fetch API keys from environment variables
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
-BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY")
-ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
-ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-
-# Validate that all necessary API keys are present
-missing_keys = []
-if not BINANCE_API_KEY:
-    missing_keys.append("BINANCE_API_KEY")
-if not BINANCE_SECRET_KEY:
-    missing_keys.append("BINANCE_SECRET_KEY")
-if not ALPACA_API_KEY:
-    missing_keys.append("ALPACA_API_KEY")
-if not ALPACA_SECRET_KEY:
-    missing_keys.append("ALPACA_SECRET_KEY")
-
-if missing_keys:
-    logger.error(f"Missing environment variables: {', '.join(missing_keys)}. Exiting.")
-    sys.exit(1)
-
-ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # Use paper trading URL
+ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
 SYMBOL_ALPACA = "BTCUSD"
-QTY = 0.001  # Adjust as per your trading preferences
+QTY = 0.001
 
-# Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
 BINANCE_INTERVAL = "1m"
 
-# Strategy / logic parameters
 ATR_LEN = 10
-PRIMARY_FACTOR = 8.0  # Increased factor for Primary to ensure larger bands
-SECONDARY_FACTOR = 3.0  # Decreased factor for Secondary to ensure smaller bands
-TRAINING_DATA_PERIOD = 90  # Must match the number of ATRs available
-MAX_CANDLES = 200  # Increased to fetch sufficient data for both SuperTrends
-PRIMARY_TRAINING_PERIOD = 120  # Longer training period for Primary
-SECONDARY_TRAINING_PERIOD = 60  # Shorter training period for Secondary
+PRIMARY_FACTOR = 3.0
+SECONDARY_FACTOR = 8.0
+TRAINING_DATA_PERIOD = 100
+HIGHVOL_PERCENTILE = 0.75
+MIDVOL_PERCENTILE = 0.5
+LOWVOL_PERCENTILE = 0.25
 
-# Heartbeat & signal intervals
-HEARTBEAT_INTERVAL = 30  # seconds
-SIGNAL_CHECK_INTERVAL = 1  # seconds
+HEARTBEAT_INTERVAL = 30
+SIGNAL_CHECK_INTERVAL = 1
+START_TIME = datetime(2024, 12, 1, 9, 30).timestamp() * 1000
+END_TIME = datetime(2024, 12, 17, 16, 0).timestamp() * 1000
+MAX_CANDLES = 100
+CLUSTER_RUN_ONCE = True
 
 # Globals
 alpaca_api = AlpacaREST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 binance_client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
 
-# Data arrays
 time_array = []
 high_array = []
 low_array = []
 close_array = []
 atr_array = []
+cluster_assignments = []
 
-# Cluster assignments for Primary and Secondary SuperTrends
-cluster_assignments_primary = []
-cluster_assignments_secondary = []
+hv_new = None
+mv_new = None
+lv_new = None
 
-# Cluster centroids for Primary and Secondary SuperTrends
-hv_new_primary = None
-mv_new_primary = None
-lv_new_primary = None
-
-hv_new_secondary = None
-mv_new_secondary = None
-lv_new_secondary = None
-
-# SuperTrend indicators
 primary_supertrend = []
-primary_direction = []  # Initialize with default direction
+primary_direction = []
 primary_upperBand = []
 primary_lowerBand = []
 
 secondary_supertrend = []
-secondary_direction = []  # Initialize with default direction
+secondary_direction = []
 secondary_upperBand = []
 secondary_lowerBand = []
 
-# For pattern detection
 last_secondary_directions = []
 
-# Position tracking
 in_position = False
 position_side = None
 entry_price = None
@@ -148,144 +87,120 @@ entry_price = None
 buy_signals = []
 sell_signals = []
 
-# Heartbeat tracking
 last_heartbeat_time = 0
-
-# Threading lock for thread-safe operations
-lock = threading.Lock()
-
-print("Global variables initialized. (Running as a background worker or standalone script.)")
+lock = threading.Lock()  # For thread-safe access to global arrays
 
 ##########################################
 # HELPER FUNCTIONS
 ##########################################
 def wilder_smoothing(values, period):
-    """Applies Wilder's smoothing technique to a list of values."""
-    result = [None] * len(values)
-    if len(values) < period:
+    # Filter None
+    clean_values = [v for v in values if v is not None]
+    if len(clean_values) < period:
+        return [None]*len(values)
+    initial = sum(clean_values[:period]) / period
+    # We need indices - ensure clean_values align:
+    # This complicates indexing. Instead, assume first non-None start at beginning.
+    # If the array start has None, we must align. Let's rebuild logic:
+    # We'll skip None at start:
+    start_index = 0
+    for idx,v in enumerate(values):
+        if v is not None:
+            start_index = idx
+            break
+    length = len(values)
+    result = [None]*length
+    if length-start_index < period:
         return result
+    # initial ATR on first full window
+    sum_first = sum(values[start_index:start_index+period])
+    if None in values[start_index:start_index+period]:
+        return result
+    atr_val = sum_first / period
+    result[start_index+period-1] = atr_val
 
-    # Start smoothing after the first 'period' values
-    initial_sum = sum(values[:period])
-    result[period - 1] = initial_sum / period
-
-    for i in range(period, len(values)):
-        if values[i] is None or result[i - 1] is None:
+    # Wilder smoothing
+    for i in range(start_index+period, length):
+        if values[i] is None or result[i-1] is None:
             result[i] = None
         else:
-            result[i] = ((result[i - 1] * (period - 1)) + values[i]) / period
+            prev = result[i-1]
+            current = ((prev*(period-1)) + values[i]) / period
+            result[i] = current
 
     return result
 
-def compute_atr(highs, lows, closes, period):
-    """Computes the Average True Range (ATR) for given high, low, and close prices."""
-    tr_list = []
-
-    for i in range(len(closes)):
+def compute_atr(h_array, l_array, c_array, period):
+    length = len(c_array)
+    if length <= period:
+        return [None]*length
+    tr_list = [None]*length
+    for i in range(length):
         if i == 0:
-            tr = highs[i] - lows[i]
+            tr_list[i] = None
         else:
-            tr = max(
-                highs[i] - lows[i],
-                abs(highs[i] - closes[i - 1]),
-                abs(lows[i] - closes[i - 1])
-            )
-        tr_list.append(tr)
+            t1 = h_array[i] - l_array[i]
+            t2 = abs(h_array[i] - c_array[i-1])
+            t3 = abs(l_array[i] - c_array[i-1])
+            tr_list[i] = max(t1, t2, t3)
+    return wilder_smoothing(tr_list, period)
 
-    # Apply Wilder's smoothing (similar to Pine Script's ATR)
-    atr = [None] * len(tr_list)
-    if len(tr_list) >= period:
-        atr[period - 1] = sum(tr_list[:period]) / period
-        for i in range(period, len(tr_list)):
-            if atr[i - 1] is None:
-                atr[i] = tr_list[i]
+def run_kmeans(vol_data, hv_init, mv_init, lv_init):
+    amean = [hv_init]
+    bmean = [mv_init]
+    cmean = [lv_init]
+
+    def means_stable(m):
+        if len(m) < 2:
+            return False
+        return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
+
+    while True:
+        hv_cluster = []
+        mv_cluster = []
+        lv_cluster = []
+
+        cur_a = amean[-1]
+        cur_b = bmean[-1]
+        cur_c = cmean[-1]
+
+        for v in vol_data:
+            da = abs(v - cur_a)
+            db = abs(v - cur_b)
+            dc = abs(v - cur_c)
+            m_dist = min(da, db, dc)
+            if m_dist == da:
+                hv_cluster.append(v)
+            elif m_dist == db:
+                mv_cluster.append(v)
             else:
-                atr[i] = (atr[i - 1] * (period - 1) + tr_list[i]) / period
-    else:
-        # Not enough data to compute ATR
-        pass
+                lv_cluster.append(v)
 
-    return atr
+        new_a = statistics.mean(hv_cluster) if hv_cluster else cur_a
+        new_b = statistics.mean(mv_cluster) if mv_cluster else cur_b
+        new_c = statistics.mean(lv_cluster) if lv_cluster else cur_c
 
-def run_kmeans(vol_data, n_clusters=3, random_state=0):
-    """
-    Runs K-Means clustering on the volatility data and returns sorted centroids,
-    labels, and cluster sizes.
+        amean.append(new_a)
+        bmean.append(new_b)
+        cmean.append(new_c)
 
-    Parameters:
-    - vol_data (list or array): The volatility data to cluster.
-    - n_clusters (int): Number of clusters.
-    - random_state (int): Determines random number generation for centroid initialization.
+        stable_a = means_stable(amean)
+        stable_b = means_stable(bmean)
+        stable_c = means_stable(cmean)
 
-    Returns:
-    - hv (float): High Volatility centroid.
-    - mv (float): Medium Volatility centroid.
-    - lv (float): Low Volatility centroid.
-    - sorted_labels (list): Cluster assignments for each data point.
-    - cluster_sizes (dict): Number of data points in each cluster.
-    """
-    try:
-        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
-        kmeans.fit(np.array(vol_data).reshape(-1, 1))
-        centroids = kmeans.cluster_centers_.flatten()
-        labels = kmeans.labels_
-
-        # Sort centroids and re-map labels accordingly
-        sorted_indices = np.argsort(centroids)
-        sorted_centroids = centroids[sorted_indices]
-        label_mapping = {original: sorted_idx for sorted_idx, original in enumerate(sorted_indices)}
-        sorted_labels = [label_mapping[label] for label in labels]
-
-        # Calculate cluster sizes
-        cluster_sizes = {
-            'Low': sorted_labels.count(0),
-            'Medium': sorted_labels.count(1),
-            'High': sorted_labels.count(2)
-        }
-
-        hv = sorted_centroids[2]  # High Volatility
-        mv = sorted_centroids[1]  # Medium Volatility
-        lv = sorted_centroids[0]  # Low Volatility
-
-        # Validate centroid sorting
-        if not (hv > mv > lv):
-            logger.error(f"Cluster centroids not sorted correctly: HV={hv}, MV={mv}, LV={lv}")
-
-        logger.debug(
-            f"K-Means Centroids: HV={hv:.4f}, MV={mv:.4f}, LV={lv:.4f} | "
-            f"Counts: HV={cluster_sizes['High']}, MV={cluster_sizes['Medium']}, LV={cluster_sizes['Low']}"
-        )
-
-        return hv, mv, lv, sorted_labels, cluster_sizes
-
-    except Exception as e:
-        logger.error(f"K-Means failed: {e}", exc_info=True)
-        return None, None, None, [], {}
+        if stable_a and stable_b and stable_c:
+            return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
 
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
-    """
-    Computes the SuperTrend indicator for a given index.
-
-    Parameters:
-    - i (int): The current index in the data arrays.
-    - factor (float): The ATR multiplier factor.
-    - assigned_atr (float): The ATR value assigned based on cluster.
-    - st_array (list): The SuperTrend array to update.
-    - dir_array (list): The direction array to update.
-    - ub_array (list): The upper band array to update.
-    - lb_array (list): The lower band array to update.
-    """
     with lock:
         length = len(close_array)
-        if i < 0 or i >= length:
-            logger.error(f"compute_supertrend called with invalid index: {i}")
+        if i<0 or i>=length:
             return
-
         if assigned_atr is None:
-            st_array[i] = st_array[i-1] if i > 0 else None
-            dir_array[i] = dir_array[i-1] if i > 0 else 1  # Initialize with 1 (Bullish)
-            ub_array[i] = ub_array[i-1] if ub_array[i -1] is not None else None
-            lb_array[i] = lb_array[i -1] if lb_array[i -1] is not None else None
+            st_array[i] = st_array[i-1] if i>0 else None
+            dir_array[i] = dir_array[i-1] if i>0 else 1
+            ub_array[i] = ub_array[i-1] if i>0 else None
+            lb_array[i] = lb_array[i-1] if i>0 else None
             return
 
         hl2 = (high_array[i] + low_array[i]) / 2.0
@@ -293,78 +208,44 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         downBand = hl2 - factor * assigned_atr
 
         if i == 0:
-            dir_array[i] = 1  # Initial direction (Bullish)
+            dir_array[i] = 1
             ub_array[i] = upBand
             lb_array[i] = downBand
             st_array[i] = upBand
             return
 
-        # Ensure previous index is within bounds
-        if i - 1 < 0 or i - 1 >= len(dir_array):
-            logger.error(f"SuperTrend computation at index {i} has invalid previous index {i-1}")
-            return
+        prevDir = dir_array[i-1]
+        prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
+        prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-        prevDir = dir_array[i - 1]
-        prevUB = ub_array[i - 1] if ub_array[i - 1] is not None else upBand
-        prevLB = lb_array[i - 1] if lb_array[i - 1] is not None else downBand
-
-        # Adjust bands based on previous bands and price position
-        if downBand > prevLB or close_array[i - 1] < prevLB:
-            lb = downBand
+        if (downBand > prevLB or close_array[i-1]<prevLB):
+            downBand = downBand
         else:
-            lb = prevLB
+            downBand = prevLB
 
-        if upBand < prevUB or close_array[i - 1] > prevUB:
-            ub = upBand
+        if (upBand < prevUB or close_array[i-1]>prevUB):
+            upBand = upBand
         else:
-            ub = prevUB
+            upBand = prevUB
 
-        # Determine direction based on standard SuperTrend logic
-        if prevDir == 1:  # Previously Bullish
-            if close_array[i] < lb:
-                dir_array[i] = -1  # Change to Bearish
-                logger.info(f"Direction changed to Bearish at index {i} due to price below downBand.")
+        wasUpper = (prevDir != -1)
+        if wasUpper:
+            if close_array[i] > upBand:
+                dir_array[i] = -1
             else:
-                dir_array[i] = 1   # Continue Bullish
-                logger.info(f"Direction remains Bullish at index {i}.")
-        elif prevDir == -1:  # Previously Bearish
-            if close_array[i] > ub:
-                dir_array[i] = 1   # Change to Bullish
-                logger.info(f"Direction changed to Bullish at index {i} due to price above upBand.")
-            else:
-                dir_array[i] = -1  # Continue Bearish
-                logger.info(f"Direction remains Bearish at index {i}.")
-
-        # Set SuperTrend value based on current direction
-        st_array[i] = lb if dir_array[i] == 1 else ub
-        ub_array[i] = ub
-        lb_array[i] = lb
-
-        # Log band widths for verification
-        if isinstance(ub, float) and isinstance(lb, float):
-            band_width = ub - lb
-            logger.debug(
-                f"SuperTrend computed for index {i}: Dir={dir_array[i]}, ST={st_array[i]}, "
-                f"UB={ub_array[i]}, LB={lb_array[i]}, Band Width={band_width:.2f}"
-            )
+                dir_array[i] = 1
         else:
-            logger.debug(
-                f"SuperTrend computed for index {i}: Dir={dir_array[i]}, ST={st_array[i]}, "
-                f"UB={ub_array[i]}, LB={lb_array[i]}, Band Width=N/A"
-            )
+            if close_array[i] < downBand:
+                dir_array[i] = 1
+            else:
+                dir_array[i] = -1
+
+        st_array[i] = downBand if dir_array[i] == -1 else upBand
+        ub_array[i] = upBand
+        lb_array[i] = downBand
 
 def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
-    """
-    Executes a trade via Alpaca API.
-
-    Parameters:
-    - side (str): 'buy' or 'sell'.
-    - qty (float): Quantity to trade.
-    - symbol (str): Trading symbol (e.g., 'BTCUSD').
-    - stop_loss (float, optional): Stop-loss price.
-    - take_profit (float, optional): Take-profit price.
-    """
-    logger.info(f"Executing {side.upper()} {qty} {symbol} (SL={stop_loss}, TP={take_profit})")
+    logging.info(f"Executing {side.upper()} {qty} {symbol} (SL={stop_loss}, TP={take_profit})")
     try:
         order = alpaca_api.submit_order(
             symbol=symbol,
@@ -375,287 +256,80 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
             stop_loss={"stop_price": stop_loss} if stop_loss else None,
             take_profit={"limit_price": take_profit} if take_profit else None
         )
-        logger.info(f"Order submitted: {order}")
-        with lock:
-            if side.lower() == "buy":
-                buy_signals.append((len(close_array)-1, close_array[-1]))
-            elif side.lower() == "sell":
-                sell_signals.append((len(close_array)-1, close_array[-1]))
-    except Exception as e:
-        logger.error(f"Alpaca order failed: {e}", exc_info=True)
-
-##########################################
-# INITIALIZE HISTORICAL DATA
-##########################################
-def initialize_historical_data():
-    """
-    Fetches historical data, computes ATR, runs K-Means for both SuperTrends,
-    assigns clusters, and computes SuperTrend indicators.
-    """
-    logger.info("Initializing historical data from Binance REST API...")
-
-    try:
-        bars = binance_client.get_klines(
-            symbol=BINANCE_SYMBOL,
-            interval=BINANCE_INTERVAL,
-            limit=MAX_CANDLES  # Increased to 200 to ensure enough data
-        )
-        for bar in bars:
-            open_time = bar[0]
-            high_val = float(bar[2])
-            low_val = float(bar[3])
-            close_val = float(bar[4])
-
-            time_array.append(open_time)
-            high_array.append(high_val)
-            low_array.append(low_val)
-            close_array.append(close_val)
-
-        logger.info(f"Fetched {len(close_array)} historical bars.")
-
-        # Compute ATR
-        atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-        atr_array.clear()
-        atr_array.extend(atr)
-        logger.debug(f"Computed ATR: {atr_array[-5:]}")
-
-        # Initialize cluster assignments
-        cluster_assignments_primary.clear()
-        cluster_assignments_secondary.clear()
-        cluster_assignments_primary.extend([None] * len(close_array))
-        cluster_assignments_secondary.extend([None] * len(close_array))
-
-        # Initialize SuperTrend arrays
-        primary_supertrend.clear()
-        primary_direction.clear()
-        primary_upperBand.clear()
-        primary_lowerBand.clear()
-
-        secondary_supertrend.clear()
-        secondary_direction.clear()
-        secondary_upperBand.clear()
-        secondary_lowerBand.clear()
-
-        # Pre-populate SuperTrend arrays with default direction (1) # Initialize as Bullish
-        for _ in close_array:
-            primary_supertrend.append(None)
-            primary_direction.append(1)  # Initialize with 1 (Bullish)
-            primary_upperBand.append(None)
-            primary_lowerBand.append(None)
-
-            secondary_supertrend.append(None)
-            secondary_direction.append(1)  # Initialize with 1 (Bullish)
-            secondary_upperBand.append(None)
-            secondary_lowerBand.append(None)
-
-        logger.info("SuperTrend arrays initialized.")
-
-        ##########################################
-        # RUN K-MEANS FOR PRIMARY SUPERTREND
-        ##########################################
-        if len(atr_array) >= PRIMARY_TRAINING_PERIOD:
-            vol_data_primary = atr_array[-PRIMARY_TRAINING_PERIOD:]
-            if len(vol_data_primary) == PRIMARY_TRAINING_PERIOD:
-                logger.info("Running K-Means for Primary SuperTrend on historical ATR data...")
-                hv_primary, mv_primary, lv_primary, labels_primary, cluster_sizes_primary = run_kmeans(
-                    vol_data_primary,
-                    n_clusters=3,
-                    random_state=0  # Primary uses 0
-                )
-                if hv_primary and mv_primary and lv_primary:
-                    global hv_new_primary, mv_new_primary, lv_new_primary
-                    hv_new_primary, mv_new_primary, lv_new_primary = hv_primary, mv_primary, lv_primary
-                    logger.info(
-                        f"K-Means for Primary SuperTrend: HV={hv_new_primary:.4f}, MV={mv_new_primary:.4f}, LV={lv_new_primary:.4f} | "
-                        f"Counts: HV={cluster_sizes_primary['High']}, MV={cluster_sizes_primary['Medium']}, LV={cluster_sizes_primary['Low']}"
-                    )
-
-                    # Assign clusters and compute SuperTrend for Primary SuperTrend
-                    start_idx = len(close_array) - PRIMARY_TRAINING_PERIOD
-                    for idx in range(start_idx, len(close_array)):
-                        vol = atr_array[idx]
-                        distances = [abs(vol - hv_new_primary), abs(vol - mv_new_primary), abs(vol - lv_new_primary)]
-                        c_idx_primary = distances.index(min(distances))
-                        cluster_assignments_primary[idx] = c_idx_primary
-                        assigned_centroid_primary = [lv_new_primary, mv_new_primary, hv_new_primary][c_idx_primary]
-                        # Compute SuperTrend without direct direction assignment
-                        compute_supertrend(
-                            i=idx,
-                            factor=PRIMARY_FACTOR,
-                            assigned_atr=assigned_centroid_primary,
-                            st_array=primary_supertrend,
-                            dir_array=primary_direction,
-                            ub_array=primary_upperBand,
-                            lb_array=primary_lowerBand
-                        )
-                        logger.debug(f"Primary SuperTrend updated for index {idx}")
-
-                else:
-                    logger.warning("K-Means for Primary SuperTrend returned invalid centroids.")
-            else:
-                logger.warning("Insufficient ATR data for Primary SuperTrend K-Means.")
+        logging.info(f"Order submitted: {order}")
+        if side == "buy":
+            buy_signals.append((len(close_array)-1, close_array[-1]))
         else:
-            logger.warning("Not enough ATR data to run K-Means for Primary SuperTrend.")
-
-        ##########################################
-        # RUN K-MEANS FOR SECONDARY SUPERTREND
-        ##########################################
-        if len(atr_array) >= (PRIMARY_TRAINING_PERIOD + SECONDARY_TRAINING_PERIOD):
-            vol_data_secondary = atr_array[-(PRIMARY_TRAINING_PERIOD + SECONDARY_TRAINING_PERIOD):-PRIMARY_TRAINING_PERIOD]
-            if len(vol_data_secondary) == SECONDARY_TRAINING_PERIOD:
-                logger.info("Running K-Means for Secondary SuperTrend on historical ATR data...")
-                hv_secondary, mv_secondary, lv_secondary, labels_secondary, cluster_sizes_secondary = run_kmeans(
-                    vol_data_secondary,
-                    n_clusters=3,
-                    random_state=1  # Secondary uses 1
-                )
-                if hv_secondary and mv_secondary and lv_secondary:
-                    global hv_new_secondary, mv_new_secondary, lv_new_secondary
-                    hv_new_secondary, mv_new_secondary, lv_new_secondary = hv_secondary, mv_secondary, lv_secondary
-                    logger.info(
-                        f"K-Means for Secondary SuperTrend: HV={hv_new_secondary:.4f}, MV={mv_new_secondary:.4f}, LV={lv_new_secondary:.4f} | "
-                        f"Counts: HV={cluster_sizes_secondary['High']}, MV={cluster_sizes_secondary['Medium']}, LV={cluster_sizes_secondary['Low']}"
-                    )
-
-                    # Assign clusters and compute SuperTrend for Secondary SuperTrend
-                    start_idx = len(close_array) - PRIMARY_TRAINING_PERIOD
-                    for idx in range(start_idx, len(close_array)):
-                        vol = atr_array[idx]
-                        distances = [abs(vol - hv_new_secondary), abs(vol - mv_new_secondary), abs(vol - lv_new_secondary)]
-                        c_idx_secondary = distances.index(min(distances))
-                        cluster_assignments_secondary[idx] = c_idx_secondary
-                        assigned_centroid_secondary = [lv_new_secondary, mv_new_secondary, hv_new_secondary][c_idx_secondary]
-                        # Compute SuperTrend without direct direction assignment
-                        compute_supertrend(
-                            i=idx,
-                            factor=SECONDARY_FACTOR,
-                            assigned_atr=assigned_centroid_secondary,
-                            st_array=secondary_supertrend,
-                            dir_array=secondary_direction,
-                            ub_array=secondary_upperBand,
-                            lb_array=secondary_lowerBand
-                        )
-                        logger.debug(f"Secondary SuperTrend updated for index {idx}")
-            else:
-                logger.warning("Insufficient ATR data for Secondary SuperTrend K-Means.")
-        else:
-            logger.warning("Not enough ATR data to run K-Means for Secondary SuperTrend.")
-
-        logger.info("Historical data initialization complete.")
+            sell_signals.append((len(close_array)-1, close_array[-1]))
     except Exception as e:
-        logger.error(f"Historical data initialization failed: {e}", exc_info=True)
+        logging.error(f"Alpaca order failed: {e}", exc_info=True)
 
-
-##########################################
-# THREADS: HEARTBEAT & SIGNAL CHECK
-##########################################
 def heartbeat_logging():
-    """
-    Logs heartbeat messages to the log file at regular intervals.
-    Heartbeat messages include the latest price, SuperTrend directions,
-    cluster assignments, ATR values, and position status.
-    """
     global last_heartbeat_time
-    logger.info("Heartbeat thread started...")
-
     while True:
-        try:
-            now = time.time()
-            if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
-                with lock:
-                    if len(close_array) == 0:
-                        heartbeat_msg = "Heartbeat: No data yet."
-                    else:
-                        i = len(close_array) - 1
-                        p_dir = primary_direction[i] if i < len(primary_direction) else 'N/A'
-                        s_dir = secondary_direction[i] if i < len(secondary_direction) else 'N/A'
-                        c_idx_primary = cluster_assignments_primary[i] if i < len(cluster_assignments_primary) else 'N/A'
-                        c_idx_secondary = cluster_assignments_secondary[i] if i < len(cluster_assignments_secondary) else 'N/A'
-
-                        assigned_centroid_primary = (
-                            [lv_new_primary, mv_new_primary, hv_new_primary][c_idx_primary]
-                            if isinstance(c_idx_primary, int) and c_idx_primary in [0,1,2] else 'N/A'
-                        )
-                        assigned_centroid_secondary = (
-                            [lv_new_secondary, mv_new_secondary, hv_new_secondary][c_idx_secondary]
-                            if isinstance(c_idx_secondary, int) and c_idx_secondary in [0,1,2] else 'N/A'
-                        )
-
-                        pri_st = primary_supertrend[i] if i < len(primary_supertrend) else 'N/A'
-                        sec_st = secondary_supertrend[i] if i < len(secondary_supertrend) else 'N/A'
-
-                        primary_atr_val = (
-                            round(assigned_centroid_primary * PRIMARY_FACTOR, 2)
-                            if isinstance(assigned_centroid_primary, float) else 'N/A'
-                        )
-                        secondary_atr_val = (
-                            round(assigned_centroid_secondary * SECONDARY_FACTOR, 2)
-                            if isinstance(assigned_centroid_secondary, float) else 'N/A'
-                        )
-
-                        # Construct a single-line heartbeat message
-                        heartbeat_msg = (
-                            f"Heartbeat: Last Price={close_array[i]:.2f}, "
-                            f"Primary Dir={p_dir}, Secondary Dir={s_dir}, "
-                            f"Primary Cluster={c_idx_primary}, Secondary Cluster={c_idx_secondary}, "
-                            f"Primary Cluster Sizes: Low={cluster_assignments_primary.count(0)}, "
-                            f"Med={cluster_assignments_primary.count(1)}, High={cluster_assignments_primary.count(2)}, "
-                            f"Secondary Cluster Sizes: Low={cluster_assignments_secondary.count(0)}, "
-                            f"Med={cluster_assignments_secondary.count(1)}, High={cluster_assignments_secondary.count(2)}, "
-                            f"Primary ATR={primary_atr_val}, Secondary ATR={secondary_atr_val}, "
-                            f"PriST={pri_st}, SecST={sec_st}, "
-                            f"In Position={in_position} ({position_side}), Entry Price={entry_price}"
-                            
-                        )
-
-                        # Log the heartbeat message with the 'heartbeat' attribute
-                        logger.info(heartbeat_msg, extra={'heartbeat': True})
-
-                    last_heartbeat_time = now
-        except Exception as e:
-            logger.error(f"Error in heartbeat: {e}", exc_info=True)
-        time.sleep(1)  # Check every second
+        now = time.time()
+        if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+            with lock:
+                if len(close_array) == 0:
+                    logging.info("No data yet.")
+                else:
+                    i = len(close_array)-1
+                    msg = "\n=== Heartbeat ===\n"
+                    msg += f"Last Price: {close_array[i]:.2f}\n"
+                    p_dir = primary_direction[i] if i<len(primary_direction) else None
+                    s_dir = secondary_direction[i] if i<len(secondary_direction) else None
+                    c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
+                    msg += f"Primary Dir: {p_dir}\n"
+                    msg += f"Secondary Dir: {s_dir}\n"
+                    msg += f"Cluster: {c_idx if c_idx is not None else 'None'} (0=High,1=Med,2=Low)\n"
+                    last_atr = atr_array[i] if i<len(atr_array) else None
+                    msg += f"ATR: {last_atr if last_atr is not None else 'N/A'}\n"
+                    pri_st = primary_supertrend[i] if i<len(primary_supertrend) else None
+                    sec_st = secondary_supertrend[i] if i<len(secondary_supertrend) else None
+                    msg += f"PriST: {pri_st if pri_st else 'N/A'}\n"
+                    msg += f"SecST: {sec_st if sec_st else 'N/A'}\n"
+                    msg += f"In Position: {in_position} ({position_side})\n"
+                    msg += f"Entry Price: {entry_price}\n"
+                    msg +=   "=============="
+                    logging.info(msg)
+            last_heartbeat_time = now
+        time.sleep(1)
 
 def check_signals():
-    """
-    Monitors SuperTrend indicators and cluster assignments to detect buy and sell signals.
-    Executes trades based on defined patterns and manages open positions.
-    """
     global in_position, position_side, entry_price
-    logger.info("Signal checking thread started...")
-
     while True:
-        try:
-            with lock:
-                length = len(close_array)
-                if length > 0:
-                    i = length - 1
-                    p_dir = primary_direction[i] if i < len(primary_direction) else None
-                    s_dir = secondary_direction[i] if i < len(secondary_direction) else None
-                    c_idx_primary = cluster_assignments_primary[i] if i < len(cluster_assignments_primary) else None
-                    c_idx_secondary = cluster_assignments_secondary[i] if i < len(cluster_assignments_secondary) else None
+        with lock:
+            length = len(close_array)
+            if length == 0:
+                pass
+            else:
+                i = length - 1
+                t = time_array[i]
+                if t < START_TIME or t > END_TIME:
+                    if in_position:
+                        logging.info("Outside trading window. Closing position.")
+                        execute_trade("sell", QTY, SYMBOL_ALPACA)
+                        in_position = False
+                        position_side = None
+                        entry_price = None
+                else:
+                    p_dir = primary_direction[i] if i<len(primary_direction) else None
+                    s_dir = secondary_direction[i] if i<len(secondary_direction) else None
+                    c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
 
-                    if (p_dir is not None
-                        and s_dir is not None
-                        and c_idx_primary is not None
-                        and c_idx_secondary is not None
-                        and len(last_secondary_directions) >= 3):
-
+                    if p_dir is not None and s_dir is not None and c_idx is not None and len(last_secondary_directions)>=3:
                         recent_3 = last_secondary_directions[-3:]
                         bullish_bearish_bullish = (recent_3 == [1, -1, 1])
                         bearish_bullish_bearish = (recent_3 == [-1, 1, -1])
+
                         current_price = close_array[i]
 
                         # LONG ENTRY
-                        if (not in_position
-                            and bullish_bearish_bullish
-                            and p_dir == 1
-                            and c_idx_primary == 2  # High Volatility for Primary
-                            and c_idx_secondary == 2):  # High Volatility for Secondary
+                        if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
                             sl = low_array[i]
                             dist = current_price - sl
                             tp = current_price + (1.5 * dist)
-                            logger.info("Pullback BUY triggered!")
+                            logging.info("Pullback BUY triggered!")
                             execute_trade(
                                 side="buy",
                                 qty=QTY,
@@ -668,15 +342,11 @@ def check_signals():
                             entry_price = current_price
 
                         # SHORT ENTRY
-                        if (not in_position
-                            and bearish_bullish_bearish
-                            and p_dir == -1
-                            and c_idx_primary == 2  # High Volatility for Primary
-                            and c_idx_secondary == 2):  # High Volatility for Secondary
+                        if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
                             sl = high_array[i]
                             dist = sl - current_price
                             tp = current_price - (1.5 * dist)
-                            logger.info("Pullback SHORT triggered!")
+                            logging.info("Pullback SHORT triggered!")
                             execute_trade(
                                 side="sell",
                                 qty=QTY,
@@ -688,245 +358,275 @@ def check_signals():
                             position_side = "short"
                             entry_price = current_price
 
-                        # EXIT LOGIC for LONG
+                        # EXIT LOGIC
                         if in_position and position_side == "long" and p_dir == -1:
-                            logger.info("Primary turned bearish. Closing LONG.")
+                            logging.info("Primary turned bearish. Closing LONG.")
                             execute_trade("sell", QTY, SYMBOL_ALPACA)
                             in_position = False
                             position_side = None
                             entry_price = None
 
-                        # EXIT LOGIC for SHORT
                         if in_position and position_side == "short" and p_dir == 1:
-                            logger.info("Primary turned bullish. Closing SHORT.")
+                            logging.info("Primary turned bullish. Closing SHORT.")
                             execute_trade("buy", QTY, SYMBOL_ALPACA)
                             in_position = False
                             position_side = None
                             entry_price = None
 
-                    # Update last_secondary_directions based on current secondary direction
-                    if s_dir is not None:
-                        last_secondary_directions.append(s_dir)
-                        if len(last_secondary_directions) > 10:
-                            last_secondary_directions.pop(0)
+        time.sleep(SIGNAL_CHECK_INTERVAL)
 
-        except Exception as e:
-            logger.error(f"Error in check_signals: {e}", exc_info=True)
-        time.sleep(SIGNAL_CHECK_INTERVAL)  # Check every second
-
-##########################################
-# WEBSOCKET CALLBACK
-##########################################
 def on_message_candle(msg):
-    """
-    Callback function for Binance WebSocket kline messages.
-    """
-    try:
-        if 'k' not in msg:
-            logger.debug("Received message without 'k' key. Ignoring.")
-            return
+    global hv_new, mv_new, lv_new
+    if 'k' not in msg:
+        return
 
-        k = msg['k']
-        is_final = k['x']
-        close_price = float(k['c'])
-        high_price = float(k['h'])
-        low_price = float(k['l'])
-        open_time = k['t']
+    k = msg['k']
+    is_final = k['x']
+    close_price = float(k['c'])
+    high_price = float(k['h'])
+    low_price = float(k['l'])
+    open_time = k['t']
 
-        if is_final:
-            logger.info("on_message_candle: Candle is final. Appending new bar...")
+    if is_final:
+        with lock:
+            time_array.append(open_time)
+            high_array.append(high_price)
+            low_array.append(low_price)
+            close_array.append(close_price)
 
-            with lock:
-                # Append new candle data
-                time_array.append(open_time)
-                high_array.append(high_price)
-                low_array.append(low_price)
-                close_array.append(close_price)
+            # Trim arrays
+            while len(time_array) > MAX_CANDLES:
+                time_array.pop(0)
+                high_array.pop(0)
+                low_array.pop(0)
+                close_array.pop(0)
 
-                # Trim arrays to maintain MAX_CANDLES
-                while len(time_array) > MAX_CANDLES:
-                    time_array.pop(0)
-                    high_array.pop(0)
-                    low_array.pop(0)
-                    close_array.pop(0)
-                    atr_array.pop(0)
-                    cluster_assignments_primary.pop(0)
-                    cluster_assignments_secondary.pop(0)
-                    primary_supertrend.pop(0)
-                    primary_direction.pop(0)
-                    primary_upperBand.pop(0)
-                    primary_lowerBand.pop(0)
-                    secondary_supertrend.pop(0)
-                    secondary_direction.pop(0)
-                    secondary_upperBand.pop(0)
-                    secondary_lowerBand.pop(0)
+            # Compute ATR if enough data
+            if len(close_array) > ATR_LEN:
+                new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
+                atr_array.clear()
+                atr_array.extend(new_atr)
+            else:
+                # Not enough data for ATR
+                atr_array.clear()
+                atr_array.extend([None]*len(close_array))
 
-                # Compute ATR
-                if len(close_array) >= ATR_LEN:
-                    new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-                    atr_array.clear()
-                    atr_array.extend(new_atr)
-                    logger.debug(f"Computed ATR: {atr_array[-5:]}")
-                else:
-                    atr_array.clear()
-                    atr_array.extend([None] * len(close_array))  # Use None for insufficient data
-                    logger.debug("Not enough data to compute ATR.")
+            while len(atr_array) > len(close_array):
+                atr_array.pop(0)
 
-                # Sync cluster_assignments_primary and cluster_assignments_secondary with close_array
-                while len(cluster_assignments_primary) < len(close_array):
-                    cluster_assignments_primary.append(None)
-                while len(cluster_assignments_primary) > len(close_array):
-                    cluster_assignments_primary.pop(0)
+            # Adjust cluster_assignments
+            while len(cluster_assignments) < len(close_array):
+                cluster_assignments.append(None)
+            while len(cluster_assignments) > len(close_array):
+                cluster_assignments.pop(0)
 
-                while len(cluster_assignments_secondary) < len(close_array):
-                    cluster_assignments_secondary.append(None)
-                while len(cluster_assignments_secondary) > len(close_array):
-                    cluster_assignments_secondary.pop(0)
+            def fix_arrays(st, di, ub, lb):
+                needed_len = len(close_array)
+                while len(st) < needed_len:
+                    st.append(None)
+                while len(st) > needed_len:
+                    st.pop(0)
+                while len(di) < needed_len:
+                    di.append(None)
+                while len(di) > needed_len:
+                    di.pop(0)
+                while len(ub) < needed_len:
+                    ub.append(None)
+                while len(ub) > needed_len:
+                    ub.pop(0)
+                while len(lb) < needed_len:
+                    lb.append(None)
+                while len(lb) > needed_len:
+                    lb.pop(0)
 
-                # Ensure SuperTrend arrays are synchronized
-                def fix_arrays(st, di, ub, lb):
-                    needed_len = len(close_array)
-                    while len(st) < needed_len:
-                        st.append(None)
-                    while len(st) > needed_len:
-                        st.pop(0)
-                    while len(di) < needed_len:
-                        di.append(1)  # Initialize with 1 (Bullish)
-                    while len(di) > needed_len:
-                        di.pop(0)
-                    while len(ub) < needed_len:
-                        ub.append(None)
-                    while len(ub) > needed_len:
-                        ub.pop(0)
-                    while len(lb) < needed_len:
-                        lb.append(None)
-                    while len(lb) > needed_len:
-                        lb.pop(0)
+            fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+            fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
 
-                fix_arrays(primary_supertrend, primary_direction,
-                           primary_upperBand, primary_lowerBand)
-                fix_arrays(secondary_supertrend, secondary_direction,
-                           secondary_upperBand, secondary_lowerBand)
+            data_count = len(close_array)
+            if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
+                start_idx = data_count - TRAINING_DATA_PERIOD
+                vol_data = [x for x in atr_array[start_idx:] if x is not None]
+                if len(vol_data) == TRAINING_DATA_PERIOD:
+                    upper_val = max(vol_data)
+                    lower_val = min(vol_data)
+                    hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
+                    mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
+                    lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
 
-                data_count = len(close_array)
+                    hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                    hv_new, mv_new, lv_new = hvf, mvf, lvf
+                    logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
 
-                # Assign cluster and compute SuperTrend for Primary SuperTrend
-                if hv_new_primary and mv_new_primary and lv_new_primary and atr_array[-1] is not None:
-                    vol_primary = atr_array[-1]
-                    distances_primary = [abs(vol_primary - hv_new_primary), abs(vol_primary - mv_new_primary), abs(vol_primary - lv_new_primary)]
-                    c_idx_primary = distances_primary.index(min(distances_primary))
-                    cluster_assignments_primary[-1] = c_idx_primary
-                    assigned_centroid_primary = [lv_new_primary, mv_new_primary, hv_new_primary][c_idx_primary]
-                    # Compute SuperTrend without direct direction assignment
-                    compute_supertrend(
-                        i=data_count - 1,
-                        factor=PRIMARY_FACTOR,
-                        assigned_atr=assigned_centroid_primary,
-                        st_array=primary_supertrend,
-                        dir_array=primary_direction,
-                        ub_array=primary_upperBand,
-                        lb_array=primary_lowerBand
-                    )
-                    logger.debug(f"Primary SuperTrend updated for index {data_count - 1}")
+            i = len(close_array)-1
+            assigned_centroid = None
+            vol = atr_array[i] if i<len(atr_array) else None
+            if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
+                dA = abs(vol - hv_new)
+                dB = abs(vol - mv_new)
+                dC = abs(vol - lv_new)
+                distances = [dA, dB, dC]
+                c_idx = distances.index(min(distances))
+                cluster_assignments[i] = c_idx
+                assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
 
-                # Assign cluster and compute SuperTrend for Secondary SuperTrend
-                if hv_new_secondary and mv_new_secondary and lv_new_secondary and atr_array[-1] is not None:
-                    vol_secondary = atr_array[-1]
-                    distances_secondary = [abs(vol_secondary - hv_new_secondary), abs(vol_secondary - mv_new_secondary), abs(vol_secondary - lv_new_secondary)]
-                    c_idx_secondary = distances_secondary.index(min(distances_secondary))
-                    cluster_assignments_secondary[-1] = c_idx_secondary
-                    assigned_centroid_secondary = [lv_new_secondary, mv_new_secondary, hv_new_secondary][c_idx_secondary]
-                    # Compute SuperTrend without direct direction assignment
-                    compute_supertrend(
-                        i=data_count - 1,
-                        factor=SECONDARY_FACTOR,
-                        assigned_atr=assigned_centroid_secondary,
-                        st_array=secondary_supertrend,
-                        dir_array=secondary_direction,
-                        ub_array=secondary_upperBand,
-                        lb_array=secondary_lowerBand
-                    )
-                    logger.debug(f"Secondary SuperTrend updated for index {data_count - 1}")
-    except Exception as e:
-        logger.error(f"SuperTrend calculation failed: {e}", exc_info=True)
+            compute_supertrend(
+                i, PRIMARY_FACTOR, assigned_centroid,
+                primary_supertrend, primary_direction,
+                primary_upperBand, primary_lowerBand
+            )
+            compute_supertrend(
+                i, SECONDARY_FACTOR, assigned_centroid,
+                secondary_supertrend, secondary_direction,
+                secondary_upperBand, secondary_lowerBand
+            )
 
+            if i<len(secondary_direction) and secondary_direction[i] is not None:
+                last_secondary_directions.append(secondary_direction[i])
+                if len(last_secondary_directions) > 10:
+                    last_secondary_directions.pop(0)
 
-    ##########################################
-    # START THE BINANCE WEBSOCKET
-    ##########################################
 def start_binance_websocket():
-    """
-    Starts the Binance WebSocket for receiving real-time candle data.
-    """
     while True:
         try:
-            logger.info("Starting Binance WebSocket (background worker).")
-            twm = ThreadedWebsocketManager(
-                api_key=BINANCE_API_KEY,
-                api_secret=BINANCE_SECRET_KEY
-            )
+            logging.info("Starting Binance WebSocket...")
+            twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
             twm.start()
-
-            # Start the kline socket for the specified symbol/interval
-            logger.info(f"Subscribing to {BINANCE_SYMBOL} {BINANCE_INTERVAL} kline stream.")
             twm.start_kline_socket(
                 callback=on_message_candle,
-                symbol=BINANCE_SYMBOL,
+                symbol=BINANCE_SYMBOL.lower(),
                 interval=BINANCE_INTERVAL
             )
-
-            # Keep the WebSocket alive
             twm.join()
-
         except Exception as e:
-            logger.error(f"WebSocket error: {e}. Reconnecting in 30 seconds...", exc_info=True)
-            time.sleep(30)  # Wait before reconnecting
+            logging.error(f"Binance WebSocket error: {e}", exc_info=True)
+            logging.info("Reconnecting in 30 seconds...")
+            time.sleep(30)
+
+##########################################
+# DASHBOARD (Optional)
+##########################################
+server = Flask(__name__)
+dash_app = Dash(__name__, server=server, url_base_pathname="/dashboard/")
+
+dash_app.layout = html.Div([
+    html.H1("Trading Bot Dashboard", style={'text-align': 'center'}),
+    html.Div([
+        dcc.Graph(id='primary-chart', style={'height': '50vh'}),
+        dcc.Graph(id='secondary-chart', style={'height': '50vh'}),
+    ]),
+    html.H3("Metrics Table", style={'margin-top': '20px'}),
+    html.Table(id='metrics-table', style={'width': '100%', 'border': '1px solid black', 'border-collapse': 'collapse'}),
+    dcc.Interval(
+        id='update-interval',
+        interval=30*1000,
+        n_intervals=0
+    )
+])
+
+@dash_app.callback(
+    [Output('primary-chart', 'figure'),
+     Output('secondary-chart', 'figure'),
+     Output('metrics-table', 'children')],
+    [Input('update-interval', 'n_intervals')]
+)
+def update_dashboard(n):
+    with lock:
+        if len(close_array) == 0:
+            return go.Figure(), go.Figure(), [html.Tr([html.Th("No data available")])]
+
+        length = len(close_array)
+        indices = list(range(length))
+
+        # Primary figure
+        primary_fig = go.Figure()
+        primary_fig.add_trace(go.Scatter(x=indices, y=close_array, mode='lines', name='Close', line=dict(color='blue')))
+        if primary_upperBand:
+            primary_fig.add_trace(go.Scatter(x=indices, y=primary_upperBand, mode='lines', name='Primary Upper', line=dict(color='green', dash='dash')))
+        if primary_lowerBand:
+            primary_fig.add_trace(go.Scatter(x=indices, y=primary_lowerBand, mode='lines', name='Primary Lower', line=dict(color='red', dash='dash')))
+
+        primary_st_green = [primary_supertrend[i] if (i<len(primary_direction) and primary_direction[i]==1) else None for i in indices]
+        primary_st_red   = [primary_supertrend[i] if (i<len(primary_direction) and primary_direction[i]==-1) else None for i in indices]
+
+        primary_fig.add_trace(go.Scatter(x=indices, y=primary_st_green, mode='lines', name='Pri ST Bullish', line=dict(color='green')))
+        primary_fig.add_trace(go.Scatter(x=indices, y=primary_st_red, mode='lines', name='Pri ST Bearish', line=dict(color='red')))
+
+        # Buy/Sell signals
+        for (idx_b, price_b) in buy_signals:
+            if 0 <= idx_b < length:
+                primary_fig.add_trace(go.Scatter(x=[idx_b], y=[price_b], mode='markers', marker=dict(symbol='triangle-up', size=10, color='green'), name='Buy'))
+        for (idx_s, price_s) in sell_signals:
+            if 0 <= idx_s < length:
+                primary_fig.add_trace(go.Scatter(x=[idx_s], y=[price_s], mode='markers', marker=dict(symbol='triangle-down', size=10, color='red'), name='Sell'))
+
+        primary_fig.update_layout(title="Primary Signal")
+
+        # Secondary figure
+        secondary_fig = go.Figure()
+        secondary_fig.add_trace(go.Scatter(x=indices, y=close_array, mode='lines', name='Close', line=dict(color='blue')))
+        if secondary_upperBand:
+            secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_upperBand, mode='lines', name='Sec Upper', line=dict(color='green', dash='dash')))
+        if secondary_lowerBand:
+            secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_lowerBand, mode='lines', name='Sec Lower', line=dict(color='red', dash='dash')))
+
+        secondary_st_green = [secondary_supertrend[i] if (i<len(secondary_direction) and secondary_direction[i]==1) else None for i in indices]
+        secondary_st_red   = [secondary_supertrend[i] if (i<len(secondary_direction) and secondary_direction[i]==-1) else None for i in indices]
+
+        secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_st_green, mode='lines', name='Sec ST Bullish', line=dict(color='green')))
+        secondary_fig.add_trace(go.Scatter(x=indices, y=secondary_st_red, mode='lines', name='Sec ST Bearish', line=dict(color='red')))
+
+        secondary_fig.update_layout(title="Secondary Signal")
+
+        last_atr = atr_array[-1] if len(atr_array)>0 and atr_array[-1] is not None else "N/A"
+        current_cluster = cluster_assignments[-1] if len(cluster_assignments)>0 else None
+
+        # Just show cluster centroids if available
+        primary_centroids = [hv_new, mv_new, lv_new] if hv_new is not None and mv_new is not None and lv_new is not None else ["N/A","N/A","N/A"]
+        primary_cluster_sizes = ["N/A","N/A","N/A"]  # If you stored sizes, show them here
+        dominant_cluster = "N/A"
+
+        metrics = [
+            ["Price", f"{close_array[-1]:.2f}"],
+            ["Primary Clustering Centroids (HV,MV,LV)", ", ".join([f"{x:.2f}" if isinstance(x,float) else str(x) for x in primary_centroids])],
+            ["Primary Cluster Sizes", ", ".join(str(s) for s in primary_cluster_sizes)],
+            ["Dominant Cluster", f"{dominant_cluster}"],
+            ["Current Cluster", f"{current_cluster if current_cluster is not None else 'N/A'}"],
+            ["ATR", f"{last_atr}"],
+            ["In Position", str(in_position)],
+            ["Position Side", f"{position_side if position_side else 'None'}"],
+            ["Entry Price", f"{entry_price if entry_price else 'None'}"]
+        ]
+        table_rows = []
+        for row in metrics:
+            table_rows.append(
+                html.Tr([
+                    html.Th(row[0], style={'border':'1px solid black','padding':'5px'}),
+                    html.Td(row[1], style={'border':'1px solid black','padding':'5px'})
+                ])
+            )
+
+        return primary_fig, secondary_fig, table_rows
+
+def run_dashboard():
+    dash_app.run_server(host='0.0.0.0', port=8080, debug=False)
 
 ##########################################
 # MAIN
 ##########################################
-def main():
-    logger.info("Fetching initial historical data for warmup...")
-    initialize_historical_data()  # Populate arrays from Binance REST
-
-    logger.info("Main function start: Starting threads...")
-    # Start heartbeat thread
+if __name__ == "__main__":
+    # Start threads
     hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
     hb_thread.start()
 
-    # Start signal checking thread
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
 
-    # Start the Binance WebSocket in the main thread (blocking)
+    dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+    dashboard_thread.start()
+
+    # Start Binance WebSocket - blocking call
     start_binance_websocket()
 
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("Bot terminated by user.")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
-        sys.exit(1)
 
-##########################################
-# OPTIONAL: PLOTTING FUNCTION
-##########################################
-#def plot_supertrend():
-#    """
-#    Plots the SuperTrend indicators alongside the close price for visualization.
-#    """
-#    with lock:
-#        plt.figure(figsize=(14,7))
-#        plt.plot(close_array, label='Close Price', color='blue')
-#        plt.plot(primary_supertrend, label='Primary SuperTrend', color='green')
-#        plt.plot(secondary_supertrend, label='Secondary SuperTrend', color='red')
-#        plt.legend()
-#        plt.xlabel('Candle Index')
-#        plt.ylabel('Price')
-#        plt.title('SuperTrend Indicators')
-#        plt.show()
 
 
