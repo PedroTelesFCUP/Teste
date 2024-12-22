@@ -22,7 +22,7 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler("bot_logs.log"),  # Save logs to file
         logging.StreamHandler(sys.stdout)              # Output logs to console
-
+    ]
 )
 
 # Environment variables / credentials
