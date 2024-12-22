@@ -6,11 +6,13 @@ import statistics
 import logging
 import threading
 import pandas as pd
-from flask import Flask
+from flask import Flask, send_file
 # 3rd-party libraries
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 from alpaca_trade_api import REST as AlpacaREST
+from sklearn.cluster import KMeans
+import numpy as np
 
 # ============== CONFIGURATION ==============
 LOG_LEVEL = logging.INFO
@@ -39,7 +41,7 @@ BINANCE_INTERVAL = "1m"  # 1-minute bars
 ATR_LEN = 10
 PRIMARY_FACTOR = 3.0      # SuperTrend factor for primary
 SECONDARY_FACTOR = 8.0    # SuperTrend factor for secondary
-TRAINING_DATA_PERIOD = 1
+TRAINING_DATA_PERIOD = 3  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
@@ -47,8 +49,6 @@ LOWVOL_PERCENTILE = 0.25
 # Heartbeat intervals
 HEARTBEAT_INTERVAL = 30   # seconds
 SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
-
-
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 100
@@ -102,6 +102,14 @@ app = Flask(__name__)
 def home():
     return "Bot is running!", 200
 
+@app.route('/logs')
+def download_logs():
+    try:
+        # Assuming logs are stored in the current directory
+        return send_file(log_filename, as_attachment=True)
+    except FileNotFoundError:
+        return "Log file not found.", 404
+
 # ============== HELPER FUNCTIONS ==============
 def wilder_smoothing(values, period):
     """
@@ -111,19 +119,29 @@ def wilder_smoothing(values, period):
     result = [None]*len(values)
     if len(values) < period:
         return result
-    initial = sum(values[:period]) / period
+    # Ensure no None values in the initial period
+    initial_values = [v for v in values[:period] if v is not None]
+    if len(initial_values) < period:
+        # Not enough valid values to compute ATR
+        return result
+    initial = sum(initial_values) / period
     result[period-1] = initial
     for i in range(period, len(values)):
-        prev = result[i-1]
-        current = ((prev*(period-1)) + values[i]) / period
-        result[i] = current
+        if values[i] is None or result[i-1] is None:
+            result[i] = result[i-1] if i > 0 else None
+        else:
+            current = ((result[i-1]*(period-1)) + values[i]) / period
+            result[i] = current
     return result
 
 def compute_atr(h_array, l_array, c_array, period):
+    """Compute Average True Range (ATR)"""
     tr_list = []
     for i in range(len(c_array)):
         if i == 0:
-            tr_list.append(None)
+            # Initialize with the first True Range
+            tr = h_array[i] - l_array[i]
+            tr_list.append(tr)
             continue
         t1 = h_array[i] - l_array[i]
         t2 = abs(h_array[i] - c_array[i-1])
@@ -137,50 +155,58 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
     """
     Replicates the K-Means style clustering from Pine.
     """
-    amean = [hv_init]
-    bmean = [mv_init]
-    cmean = [lv_init]
+    if len(vol_data) < 3:
+        logging.warning("Not enough data points for K-Means clustering.")
+        return None, None, None, 0, 0, 0
 
-    def means_stable(m):
-        if len(m) < 2:
-            return False
-        return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
+    try:
+        amean = [hv_init]
+        bmean = [mv_init]
+        cmean = [lv_init]
 
-    while True:
-        hv_cluster = []
-        mv_cluster = []
-        lv_cluster = []
+        def means_stable(m):
+            if len(m) < 2:
+                return False
+            return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
 
-        cur_a = amean[-1]
-        cur_b = bmean[-1]
-        cur_c = cmean[-1]
+        while True:
+            hv_cluster = []
+            mv_cluster = []
+            lv_cluster = []
 
-        for v in vol_data:
-            da = abs(v - cur_a)
-            db = abs(v - cur_b)
-            dc = abs(v - cur_c)
-            m_dist = min(da, db, dc)
-            if m_dist == da:
-                hv_cluster.append(v)
-            elif m_dist == db:
-                mv_cluster.append(v)
-            else:
-                lv_cluster.append(v)
+            cur_a = amean[-1]
+            cur_b = bmean[-1]
+            cur_c = cmean[-1]
 
-        new_a = statistics.mean(hv_cluster) if hv_cluster else cur_a
-        new_b = statistics.mean(mv_cluster) if mv_cluster else cur_b
-        new_c = statistics.mean(lv_cluster) if lv_cluster else cur_c
+            for v in vol_data:
+                da = abs(v - cur_a)
+                db = abs(v - cur_b)
+                dc = abs(v - cur_c)
+                m_dist = min(da, db, dc)
+                if m_dist == da:
+                    hv_cluster.append(v)
+                elif m_dist == db:
+                    mv_cluster.append(v)
+                else:
+                    lv_cluster.append(v)
 
-        amean.append(new_a)
-        bmean.append(new_b)
-        cmean.append(new_c)
+            new_a = statistics.mean(hv_cluster) if hv_cluster else cur_a
+            new_b = statistics.mean(mv_cluster) if mv_cluster else cur_b
+            new_c = statistics.mean(lv_cluster) if lv_cluster else cur_c
 
-        stable_a = means_stable(amean)
-        stable_b = means_stable(bmean)
-        stable_c = means_stable(cmean)
+            amean.append(new_a)
+            bmean.append(new_b)
+            cmean.append(new_c)
 
-        if stable_a and stable_b and stable_c:
-            return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
+            stable_a = means_stable(amean)
+            stable_b = means_stable(bmean)
+            stable_c = means_stable(cmean)
+
+            if stable_a and stable_b and stable_c:
+                return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
+    except Exception as e:
+        logging.error(f"K-Means clustering failed: {e}", exc_info=True)
+        return None, None, None, 0, 0, 0
 
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
     """
@@ -267,23 +293,32 @@ def heartbeat_logging():
         if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
             if len(close_array) > 0:
                 i = len(close_array)-1
+                p_dir = primary_direction[i] if i < len(primary_direction) else 'N/A'
+                s_dir = secondary_direction[i] if i < len(secondary_direction) else 'N/A'
+                c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
+                atr = atr_array[i] if i < len(atr_array) else 'N/A'
+                pri_st = primary_supertrend[i] if i < len(primary_supertrend) else 'N/A'
+                sec_st = secondary_supertrend[i] if i < len(secondary_supertrend) else 'N/A'
+
+                cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
                 msg = "\n=== Heartbeat ===\n"
                 msg += f"Last Price: {close_array[i]:.2f}\n"
-                msg += f"Primary Dir: {primary_direction[i]}\n"
-                msg += f"Secondary Dir: {secondary_direction[i]}\n"
-                msg += f"Cluster: {cluster_assignments[i]} (0=High,1=Med,2=Low)\n"
-                msg += f"ATR: {atr_array[i] if atr_array[i] else 'N/A'}\n"
-                msg += f"PriST: {primary_supertrend[i] if primary_supertrend[i] else 'N/A'}\n"
-                msg += f"SecST: {secondary_supertrend[i] if secondary_supertrend[i] else 'N/A'}\n"
+                msg += f"Primary Dir: {p_dir}\n"
+                msg += f"Secondary Dir: {s_dir}\n"
+                msg += f"Cluster: {cluster_str}\n"
+                msg += f"ATR: {atr}\n"
+                msg += f"PriST: {pri_st}\n"
+                msg += f"SecST: {sec_st}\n"
                 msg += f"In Position: {in_position} ({position_side})\n"
                 msg += f"Entry Price: {entry_price}\n"
-                msg +=   "=============="
+                msg += "=============="
                 logging.info(msg)
             last_heartbeat_time = now
         time.sleep(1)
 
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
+    """Check for trade signals based on SuperTrend indicators"""
     global in_position, position_side, entry_price
 
     while True:
@@ -312,7 +347,7 @@ def check_signals():
                 # LONG pattern => [1, -1, 1] secondary, p_dir=1, cluster=0 => high vol
                 bullish_bearish_bullish = (recent_3 == [1, -1, 1])
                 # SHORT pattern => [-1, 1, -1], p_dir=-1, cluster=0 => high vol
-                bearish_bullish_bearish = (recent_3 == [-1, 1, -1])
+                bearish_bearish_bearish = (recent_3 == [-1, 1, -1])
 
                 # ============ LONG ENTRY ============
                 if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
@@ -335,7 +370,7 @@ def check_signals():
                     entry_price = current_price
 
                 # ============ SHORT ENTRY ============
-                if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
+                if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
                     # Stop-loss = current bar's high
                     sl = high_array[i]
                     dist = sl - current_price
@@ -353,6 +388,26 @@ def check_signals():
                     position_side = "short"
                     entry_price = current_price
 
+            # Exit Logic
+            if in_position:
+                if position_side == "long" and p_dir == -1:
+                    logging.info("Primary turned bearish. Closing LONG position.")
+                    execute_trade("sell", QTY, SYMBOL_ALPACA)
+                    in_position = False
+                    position_side = None
+                    entry_price = None
+                elif position_side == "short" and p_dir == 1:
+                    logging.info("Primary turned bullish. Closing SHORT position.")
+                    execute_trade("buy", QTY, SYMBOL_ALPACA)
+                    in_position = False
+                    position_side = None
+                    entry_price = None
+
+            # Update last_secondary_directions based on current secondary direction
+            if s_dir is not None:
+                last_secondary_directions.append(s_dir)
+                if len(last_secondary_directions) > 10:
+                    last_secondary_directions.pop(0)
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
@@ -438,8 +493,11 @@ def on_message_candle(msg):
                 lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
 
                 hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
-                hv_new, mv_new, lv_new = hvf, mvf, lvf
-                logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+                if hvf and mvf and lvf:
+                    hv_new, mv_new, lv_new = hvf, mvf, lvf
+                    logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+                else:
+                    logging.warning("K-Means did not finalize due to insufficient data or errors.")
 
         # Assign cluster & compute supertrend for this bar
         i = len(close_array)-1
@@ -454,30 +512,47 @@ def on_message_candle(msg):
             c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
             cluster_assignments[i] = c_idx
             assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+        else:
+            logging.warning("Assigned centroid is None. Skipping SuperTrend computation for this bar.")
 
-        compute_supertrend(
-            i, PRIMARY_FACTOR, assigned_centroid,
-            primary_supertrend, primary_direction,
-            primary_upperBand, primary_lowerBand
-        )
-        compute_supertrend(
-            i, SECONDARY_FACTOR, assigned_centroid,
-            secondary_supertrend, secondary_direction,
-            secondary_upperBand, secondary_lowerBand
-        )
+        if assigned_centroid is not None:
+            compute_supertrend(
+                i, PRIMARY_FACTOR, assigned_centroid,
+                primary_supertrend, primary_direction,
+                primary_upperBand, primary_lowerBand
+            )
+            compute_supertrend(
+                i, SECONDARY_FACTOR, assigned_centroid,
+                secondary_supertrend, secondary_direction,
+                secondary_upperBand, secondary_lowerBand
+            )
+        else:
+            # Assign default SuperTrend values if centroid is None
+            compute_supertrend(
+                i, PRIMARY_FACTOR, None,
+                primary_supertrend, primary_direction,
+                primary_upperBand, primary_lowerBand
+            )
+            compute_supertrend(
+                i, SECONDARY_FACTOR, None,
+                secondary_supertrend, secondary_direction,
+                secondary_upperBand, secondary_lowerBand
+            )
 
         # Update last_secondary_directions
         if secondary_direction[i] is not None:
             last_secondary_directions.append(secondary_direction[i])
             if len(last_secondary_directions) > 10:
                 last_secondary_directions.pop(0)
+
+# ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
     logging.info("Starting Binance WebSocket...")
     twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
     twm.start()
     twm.start_kline_socket(
         callback=on_message_candle,
-        symbol=BINANCE_SYMBOL.lower(),
+        symbol=BINANCE_SYMBOL,
         interval=BINANCE_INTERVAL
     )
     twm.join()  # Block here
@@ -487,19 +562,25 @@ if __name__ == "__main__":
     logging.info("Starting dual SuperTrend with long & short pullback logic...")
 
     # Start Flask app in a separate thread
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080)).start()
-    time.sleep(10)
-    # 1) Start the heartbeat logging thread
+    flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
+    flask_thread.daemon = True
+    flask_thread.start()
+    logging.info("Flask monitoring started on port 8080.")
+
+    # Start the heartbeat logging thread
     hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
     hb_thread.start()
+    logging.info("Heartbeat logging thread started.")
 
-    # 2) Start signals checking thread
+    # Start signals checking thread
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
+    logging.info("Signal checking thread started.")
 
-    # 3) Start binance websocket
+    # Start Binance WebSocket
     try:
         start_binance_websocket()
     except Exception as e:
         logging.error(f"Binance WebSocket error: {e}", exc_info=True)
         sys.exit(1)
+
