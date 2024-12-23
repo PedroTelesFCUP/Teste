@@ -295,13 +295,15 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
         logging.error(f"Alpaca order failed: {e}", exc_info=True)
 
 # ============== LOGGING (HEARTBEAT) ==============
+# ============== LOGGING (HEARTBEAT) ==============
 def heartbeat_logging():
     global last_heartbeat_time
     while True:
         now = time.time()
         if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
             if len(close_array) > 0:
-                i = len(close_array)-1
+                i = len(close_array) - 1
+                last_price_time = pd.to_datetime(time_array[i], unit='ms')  # Convert to Timestamp
                 p_dir = primary_direction[i] if i < len(primary_direction) else 'N/A'
                 s_dir = secondary_direction[i] if i < len(secondary_direction) else 'N/A'
                 c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
@@ -311,7 +313,7 @@ def heartbeat_logging():
 
                 cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
                 msg = "\n=== Heartbeat ===\n"
-                msg += f"Last Price: {close_array[i]:.2f}\n"
+                msg += f"Last Price: {close_array[i]:.2f} (at {last_price_time})\n"  # Include timestamp
                 msg += f"Primary Dir: {p_dir}\n"
                 msg += f"Secondary Dir: {s_dir}\n"
                 msg += f"Cluster: {cluster_str}\n"
