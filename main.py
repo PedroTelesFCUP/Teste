@@ -21,7 +21,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("bot_logs.log"),  # Save logs to file
-        logging.StreamHandler(sys.stdout)              # Output logs to console
+        logging.StreamHandler(sys.stdout)                       # Output logs to console
     ]
 )
 
@@ -34,7 +34,7 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "YOUR_ALPACA_SECRET_KEY")
 # Alpaca endpoints
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # paper trading
 SYMBOL_ALPACA = "BTCUSD"  # e.g. "BTCUSD" on Alpaca
-QTY = 0.001               # Example trade size
+QTY = 0.001                                    # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
@@ -42,22 +42,22 @@ BINANCE_INTERVAL = "1m"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 10
-PRIMARY_FACTOR = 7.5      # SuperTrend factor for primary
-SECONDARY_FACTOR = 2.5    # SuperTrend factor for secondary
+PRIMARY_FACTOR = 7.5     # SuperTrend factor for primary
+SECONDARY_FACTOR = 2.5     # SuperTrend factor for secondary
 TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 30   # seconds
-SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
+HEARTBEAT_INTERVAL = 30    # seconds
+DATA_CHECK_INTERVAL = 5 # Check for new data every 5 seconds
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
 
 # Number of candles to determine pullback pattern
-MAX_PULLBACK_CANDLES =30
+MAX_PULLBACK_CANDLES = 20
 
 # K-Means re-run logic
 CLUSTER_RUN_ONCE = True
@@ -95,11 +95,14 @@ last_secondary_directions = []
 
 # Position management
 in_position = False    # True if in a trade
-position_side = None   # 'long' or 'short'
+position_side = None    # 'long' or 'short'
 entry_price = None
 
 # For logging
 last_heartbeat_time = 0
+
+# For tracking last processed candle
+last_processed_candle_time = -1
 
 # Flask Server
 app = Flask(__name__)
@@ -120,7 +123,7 @@ def download_logs():
 def wilder_smoothing(values, period):
     """
     ATR uses Wilder's smoothing:
-      atr[i] = ((atr[i-1]*(period-1)) + tr[i]) / period
+    atr[i] = ((atr[i-1]*(period-1)) + tr[i]) / period
     """
     result = [None]*len(values)
     if len(values) < period:
@@ -325,111 +328,110 @@ def heartbeat_logging():
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
     """Check for trade signals based on SuperTrend indicators"""
-    global in_position, position_side, entry_price
+    global in_position, position_side, entry_price, last_processed_candle_time
 
     while True:
         try:
-            if len(close_array) == 0:
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
+            current_time = time.time()
 
-            i = len(close_array)-1
-            t = time_array[i]
+            # Check if there's new data to process
+            if len(time_array) > 0 and time_array[-1] > last_processed_candle_time:
+                i = len(close_array) - 1
+                t = time_array[i]
 
+                # Ensure we process each candle only once
+                if t > last_processed_candle_time:
+                    last_processed_candle_time = t
+                    logging.info(f"Processing new candle: {t}")
 
-            # Gather signals
-            p_dir = primary_direction[i]
-            s_dir = secondary_direction[i]
-            c_idx = cluster_assignments[i]
-            current_price = close_array[i]
+                    # Gather signals
+                    p_dir = primary_direction[i]
+                    s_dir = secondary_direction[i]
+                    c_idx = cluster_assignments[i]
+                    current_price = close_array[i]
 
-            if p_dir is None or s_dir is None or c_idx is None:
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
+                    if p_dir is None or s_dir is None or c_idx is None:
+                        continue  # Skip if any signal is missing
 
-            # Check last 3 secondary directions for pullback pattern
-            if len(last_secondary_directions) >= 3:
-                # Extract last 3 directions
-                recent_3 = last_secondary_directions[-3:]
-                # Compute corresponding indices from the last 3 elements in close_array
-                indices = list(range(len(close_array) - 3, len(close_array)))
+                    # Check last 3 secondary directions for pullback pattern
+                    if len(last_secondary_directions) >= 3:
+                        recent_3 = last_secondary_directions[-3:]
+                        indices = list(range(len(close_array) - 3, len(close_array)))
 
-                # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
-                bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
-    
-                # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
-                bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+                        # LONG pattern: [1, -1, 1] within MAX_PULL
+                        bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+                        # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
+                        bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
+                        # ============ LONG ENTRY ============
+                        if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
+                            # Stop-loss = current bar's low
+                            sl = low_array[i]
+                            # Distance from entry to SL
+                            dist = current_price - sl
+                            # Take-profit = entry + 1.5 * dist
+                            tp = current_price + (1.5 * dist)
+                            logging.info("Pullback BUY triggered!")
+                            execute_trade(
+                                side="buy",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "long"
+                            entry_price = current_price
 
+                        # ============ SHORT ENTRY ============
+                        if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
+                            # Stop-loss = current bar's high
+                            sl = high_array[i]
+                            # Distance from entry to SL
+                            dist = sl - current_price
+                            # Take-profit = entry - 1.5 * dist
+                            tp = current_price - (1.5 * dist)
+                            logging.info("Pullback SHORT triggered!")
+                            execute_trade(
+                                side="sell",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "short"
+                            entry_price = current_price
 
-                # ============ LONG ENTRY ============
-                if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
-                    # Stop-loss = current bar's low
-                    sl = low_array[i]
-                    # Distance from entry to SL
-                    dist = current_price - sl
-                    # Take-profit = entry + 1.5 * dist
-                    tp = current_price + (1.5 * dist)
-                    logging.info("Pullback BUY triggered!")
-                    execute_trade(
-                        side="buy",
-                        qty=QTY,
-                        symbol=SYMBOL_ALPACA,
-                        stop_loss=round(sl, 2),
-                        take_profit=round(tp, 2)
-                    )
-                    in_position = True
-                    position_side = "long"
-                    entry_price = current_price
+                    # Exit Logic
+                    if in_position:
+                        if position_side == "long" and p_dir == -1:
+                            logging.info("Primary turned bearish. Closing LONG position.")
+                            execute_trade("sell", QTY, SYMBOL_ALPACA)
+                            in_position = False
+                            position_side = None
+                            entry_price = None
+                        elif position_side == "short" and p_dir == 1:
+                            logging.info("Primary turned bullish. Closing SHORT position.")
+                            execute_trade("buy", QTY, SYMBOL_ALPACA)
+                            in_position = False
+                            position_side = None
+                            entry_price = None
 
-                # ============ SHORT ENTRY ============
-                if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
-                    # Stop-loss = current bar's high
-                    sl = high_array[i]
-                    dist = sl - current_price
-                    # Take-profit = entry - 1.5 * dist
-                    tp = current_price - (1.5 * dist)
-                    logging.info("Pullback SHORT triggered!")
-                    execute_trade(
-                        side="sell",
-                        qty=QTY,
-                        symbol=SYMBOL_ALPACA,
-                        stop_loss=round(sl, 2),
-                        take_profit=round(tp, 2)
-                    )
-                    in_position = True
-                    position_side = "short"
-                    entry_price = current_price
-
-            # Exit Logic
-            if in_position:
-                if position_side == "long" and p_dir == -1:
-                    logging.info("Primary turned bearish. Closing LONG position.")
-                    execute_trade("sell", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    position_side = None
-                    entry_price = None
-                elif position_side == "short" and p_dir == 1:
-                    logging.info("Primary turned bullish. Closing SHORT position.")
-                    execute_trade("buy", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    position_side = None
-                    entry_price = None
-
-            # Update last_secondary_directions based on current secondary direction
-            if s_dir is not None:
-                last_secondary_directions.append(s_dir)
-                if len(last_secondary_directions) > 10:
-                    last_secondary_directions.pop(0)
+                    # Update last_secondary_directions based on current secondary direction
+                    if s_dir is not None:
+                        last_secondary_directions.append(s_dir)
+                        if len(last_secondary_directions) > 10:
+                            last_secondary_directions.pop(0)
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
 
-        time.sleep(SIGNAL_CHECK_INTERVAL)
+        time.sleep(DATA_CHECK_INTERVAL)
 
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
-    global hv_new, mv_new, lv_new  # Declare globals at the start of the function
+    global hv_new, mv_new, lv_new, last_processed_candle_time  # Declare globals at the start of the function
 
     if 'k' not in msg:
         return
@@ -442,6 +444,12 @@ def on_message_candle(msg):
     open_time = k['t']
 
     if is_final:
+        candle_time = pd.to_datetime(open_time, unit='ms') # Convert to pandas timestamp
+
+        # Check if the candle has already been processed
+        if candle_time <= last_processed_candle_time:
+            return  # Skip processing
+
         # Append new candle
         time_array.append(open_time)
         high_array.append(high_price)
@@ -558,6 +566,132 @@ def on_message_candle(msg):
             if len(last_secondary_directions) > 10:
                 last_secondary_directions.pop(0)
 
+        # Update the last processed candle time
+        last_processed_candle_time = candle_time
+
+def fetch_historical_candles(symbol, interval, limit):
+    """Fetches historical klines from Binance."""
+    logging.info(f"Fetching {limit} historical candles from Binance for symbol {symbol}...")
+    try:
+        klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        logging.info(f"Fetched {len(klines)} historical candles.")
+        return klines
+    except Exception as e:
+        logging.error(f"Error fetching historical candles: {e}", exc_info=True)
+        raise  # Re-raise the exception to halt execution
+
+def process_historical_candles(klines):
+    """Processes historical klines and populates data arrays."""
+    global hv_new, mv_new, lv_new, last_processed_candle_time
+
+    logging.info("Processing historical candles...")
+
+    for kline in klines:
+        open_time = kline[0]
+        high_price = float(kline[2])
+        low_price = float(kline[3])
+        close_price = float(kline[4])
+
+        # Convert Unix timestamp to Pandas Timestamp
+        open_time_dt = pd.to_datetime(open_time, unit='ms')
+
+        time_array.append(open_time)
+        high_array.append(high_price)
+        low_array.append(low_price)
+        close_array.append(close_price)
+
+        # Update last processed candle time
+        if open_time_dt > last_processed_candle_time:
+            last_processed_candle_time = open_time_dt
+
+    # Recompute ATR
+    new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
+    atr_array.clear()
+    atr_array.extend(new_atr)
+    logging.info(f"ATR calculated from historical data. Last 5 ATR values: {atr_array[-5:]}")
+
+    # Adjust cluster_assignments length
+    while len(cluster_assignments) < len(close_array):
+        cluster_assignments.append(None)
+    while len(cluster_assignments) > len(close_array):
+        cluster_assignments.pop(0)
+
+    # Adjust primary/secondary arrays
+    needed_len = len(close_array)
+    def fix_arrays(st, di, ub, lb):
+        while len(st) < needed_len:
+            st.append(None)
+        while len(st) > needed_len:
+            st.pop(0)
+        while len(di) < needed_len:
+            di.append(None)
+        while len(di) > needed_len:
+            di.pop(0)
+        while len(ub) < needed_len:
+            ub.append(None)
+        while len(ub) > needed_len:
+            ub.pop(0)
+        while len(lb) < needed_len:
+            lb.append(None)
+        while len(lb) > needed_len:
+            lb.pop(0)
+
+    fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+    fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+    logging.info("Primary and secondary arrays adjusted.")
+
+    # Run K-Means with historical data
+    data_count = len(close_array)
+    if data_count >= TRAINING_DATA_PERIOD:
+        start_idx = data_count - TRAINING_DATA_PERIOD
+        vol_data = [x for x in atr_array[start_idx:] if x is not None]
+
+        if len(vol_data) == TRAINING_DATA_PERIOD:
+            upper_val = max(vol_data)
+            lower_val = min(vol_data)
+            hv_init = lower_val + (upper_val - lower_val) * HIGHVOL_PERCENTILE
+            mv_init = lower_val + (upper_val - lower_val) * MIDVOL_PERCENTILE
+            lv_init = lower_val + (upper_val - lower_val) * LOWVOL_PERCENTILE
+
+            hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+            if hvf and mvf and lvf:
+                hv_new, mv_new, lv_new = hvf, mvf, lvf
+                logging.info(f"K-Means (Historical) Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+
+                # Calculate Supertrend for all historical candles
+                for i in range(len(close_array)):
+                    assigned_centroid = None
+                    vol = atr_array[i]
+
+                    if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
+                        dA = abs(vol - hv_new)
+                        dB = abs(vol - mv_new)
+                        dC = abs(vol - lv_new)
+                        distances = [dA, dB, dC]
+                        c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
+                        cluster_assignments[i] = c_idx
+                        assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+                        logging.info(f"Candle {i}: Cluster assigned: {c_idx}, Centroid: {assigned_centroid:.4f}")
+
+                    if assigned_centroid is not None:
+                        compute_supertrend(
+                            i, PRIMARY_FACTOR, assigned_centroid,
+                            primary_supertrend, primary_direction,
+                            primary_upperBand, primary_lowerBand
+                        )
+                        compute_supertrend(
+                            i, SECONDARY_FACTOR, assigned_centroid,
+                            secondary_supertrend, secondary_direction,
+                            secondary_upperBand, secondary_lowerBand
+                        )
+                        logging.info(f"Candle {i}: Primary Supertrend Direction: {primary_direction[i]}, Secondary Supertrend Direction: {secondary_direction[i]}")
+                    else:
+                        logging.warning(f"Candle {i}: Assigned centroid is None. Skipping Supertrend calculation.")
+
+            else:
+                logging.warning("K-Means (Historical) did not finalize due to insufficient data or errors.")
+    logging.info("Historical data processing complete.")
+
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
     logging.info("Starting Binance WebSocket...")
@@ -571,6 +705,7 @@ def start_binance_websocket():
     twm.join()  # Block here
 
 # ============== MAIN ==============
+
 if __name__ == "__main__":
     logging.info("Starting dual SuperTrend with long & short pullback logic...")
 
@@ -579,6 +714,10 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
     logging.info("Flask monitoring started on port 8080.")
+
+    # Fetch and process historical candles
+    historical_klines = fetch_historical_candles(BINANCE_SYMBOL, BINANCE_INTERVAL, MAX_CANDLES)
+    process_historical_candles(historical_klines)
 
     # Start the heartbeat logging thread
     hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
