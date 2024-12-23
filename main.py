@@ -264,7 +264,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         else:
             dir_array[i] = -1
 
-    st_array[i] = downBand if dir_array[i] == -1 else upBand
+    st_array[i] = upBand if dir_array[i] == -1 else downBand
     ub_array[i] = upBand
     lb_array[i] = downBand
 
