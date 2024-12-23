@@ -41,9 +41,9 @@ BINANCE_SYMBOL = "BTCUSDT"
 BINANCE_INTERVAL = "5s"  # 1-minute bars
 
 # Strategy / logic parameters
-ATR_LEN = 30
+ATR_LEN = 20
 PRIMARY_FACTOR = 10.0      # SuperTrend factor for primary
-SECONDARY_FACTOR = 2   # SuperTrend factor for secondary
+SECONDARY_FACTOR = 3.0   # SuperTrend factor for secondary
 TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
