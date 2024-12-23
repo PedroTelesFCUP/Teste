@@ -178,7 +178,8 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
                 return False
             return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
 
-        while True:
+        max_iterations = 100  # Add a maximum iteration limit
+        for _ in range(max_iterations):
             hv_cluster = []
             mv_cluster = []
             lv_cluster = []
@@ -213,6 +214,10 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
 
             if stable_a and stable_b and stable_c:
                 return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
+
+        logging.warning("K-Means did not converge within the maximum number of iterations.")
+        return None, None, None, 0, 0, 0
+
     except Exception as e:
         logging.error(f"K-Means clustering failed: {e}", exc_info=True)
         return None, None, None, 0, 0, 0
@@ -388,7 +393,6 @@ def check_signals():
                     position_side = "long"
                     entry_price = current_price
 
-                # ============ SHORT ENTRY ============
                 # ============ SHORT ENTRY ============
                 if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
                     # Stop-loss = current bar's high
@@ -582,14 +586,20 @@ def start_binance_websocket():
 
 def fetch_historical_candles(symbol, interval, limit):
     """Fetches historical klines from Binance."""
-    logging.info(f"Fetching {limit} historical candles from Binance...")
-    klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
-    logging.info(f"Fetched {len(klines)} historical candles.")
-    return klines
+    logging.info(f"Fetching {limit} historical candles from Binance for symbol {symbol}...")
+    try:
+        klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        logging.info(f"Fetched {len(klines)} historical candles.")
+        return klines
+    except Exception as e:
+        logging.error(f"Error fetching historical candles: {e}", exc_info=True)
+        raise  # Re-raise the exception to halt execution
 
 def process_historical_candles(klines):
     """Processes historical klines and populates data arrays."""
     global hv_new, mv_new, lv_new
+
+    logging.info("Processing historical candles...")
 
     for kline in klines:
         open_time = kline[0]
@@ -606,6 +616,8 @@ def process_historical_candles(klines):
     new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
     atr_array.clear()
     atr_array.extend(new_atr)
+    logging.info(f"ATR calculated from historical data. Last 5 ATR values: {atr_array[-5:]}")
+
     # Adjust cluster_assignments length
     while len(cluster_assignments) < len(close_array):
         cluster_assignments.append(None)
@@ -634,6 +646,7 @@ def process_historical_candles(klines):
 
     fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
     fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+    logging.info("Primary and secondary arrays adjusted.")
 
     # Run K-Means with historical data
     data_count = len(close_array)
@@ -666,6 +679,7 @@ def process_historical_candles(klines):
                         c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
                         cluster_assignments[i] = c_idx
                         assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+                        logging.info(f"Candle {i}: Cluster assigned: {c_idx}, Centroid: {assigned_centroid:.4f}")
 
                     if assigned_centroid is not None:
                         compute_supertrend(
@@ -678,8 +692,13 @@ def process_historical_candles(klines):
                             secondary_supertrend, secondary_direction,
                             secondary_upperBand, secondary_lowerBand
                         )
+                        logging.info(f"Candle {i}: Primary Supertrend Direction: {primary_direction[i]}, Secondary Supertrend Direction: {secondary_direction[i]}")
+                    else:
+                        logging.warning(f"Candle {i}: Assigned centroid is None. Skipping Supertrend calculation.")
+
             else:
                 logging.warning("K-Means (Historical) did not finalize due to insufficient data or errors.")
+    logging.info("Historical data processing complete.")
 
 # ============== MAIN ==============
 if __name__ == "__main__":
@@ -704,7 +723,7 @@ if __name__ == "__main__":
     historical_data_processed = True
 
     # Check signals immediately after processing historical data
-    logging.info("initial check signals after historical data")
+    logging.info("Initial check signals after historical data")
     check_signals()
 
     # Start Binance WebSocket
