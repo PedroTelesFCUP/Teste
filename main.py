@@ -38,7 +38,7 @@ QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "1s"  # 1-minute bars
+BINANCE_INTERVAL = "5s"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 30
@@ -50,8 +50,8 @@ MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 1   # seconds
-SIGNAL_CHECK_INTERVAL = 0.5 # check signals every 1 second
+HEARTBEAT_INTERVAL = 5   # seconds
+SIGNAL_CHECK_INTERVAL = 4 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
@@ -316,6 +316,7 @@ def heartbeat_logging():
                 msg += f"SecST: {sec_st}\n"
                 msg += f"In Position: {in_position} ({position_side})\n"
                 msg += f"Entry Price: {entry_price}\n"
+                msg += f"Secondary Directions: {secondary_direction[-3:] if len(secondary_direction) >= 3 else secondary_direction}\n"
                 msg += "=============="
                 logging.info(msg)
             last_heartbeat_time = now
