@@ -340,7 +340,7 @@ def check_signals():
                 # Gather signals
                 p_dir = primary_direction[i]
                 s_dir = secondary_direction[i]
-                c_idx = cluster_assignments[i] if clustering_ready else None
+                c_idx = cluster_assignments[i] 
                 current_price = close_array[i]
 
                 if p_dir is None or s_dir is None:
