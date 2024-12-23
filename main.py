@@ -21,7 +21,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("bot_logs.log"),  # Save logs to file
-        logging.StreamHandler(sys.stdout)                       # Output logs to console
+        logging.StreamHandler(sys.stdout)              # Output logs to console
     ]
 )
 
@@ -34,7 +34,7 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "YOUR_ALPACA_SECRET_KEY")
 # Alpaca endpoints
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # paper trading
 SYMBOL_ALPACA = "BTCUSD"  # e.g. "BTCUSD" on Alpaca
-QTY = 0.001                            # Example trade size
+QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
@@ -42,19 +42,19 @@ BINANCE_INTERVAL = "1m"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 10
-PRIMARY_FACTOR = 7.5      # SuperTrend factor for primary
-SECONDARY_FACTOR = 2.5      # SuperTrend factor for secondary
-TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
+PRIMARY_FACTOR = 7.0      # SuperTrend factor for primary
+SECONDARY_FACTOR = 2.0    # SuperTrend factor for secondary
+TRAINING_DATA_PERIOD = 50  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 30    # seconds
+HEARTBEAT_INTERVAL = 30   # seconds
 SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
-MAX_CANDLES = 150
+MAX_CANDLES = 200
 
 # Number of candles to determine pullback pattern
 MAX_PULLBACK_CANDLES =20
@@ -95,7 +95,7 @@ last_secondary_directions = []
 
 # Position management
 in_position = False    # True if in a trade
-position_side = None    # 'long' or 'short'
+position_side = None   # 'long' or 'short'
 entry_price = None
 
 # For logging
@@ -103,9 +103,6 @@ last_heartbeat_time = 0
 
 # Flask Server
 app = Flask(__name__)
-
-# Flag to indicate if historical data has been processed
-historical_data_processed = False
 
 @app.route("/")
 def home():
@@ -123,7 +120,7 @@ def download_logs():
 def wilder_smoothing(values, period):
     """
     ATR uses Wilder's smoothing:
-    atr[i] = ((atr[i-1]*(period-1)) + tr[i]) / period
+      atr[i] = ((atr[i-1]*(period-1)) + tr[i]) / period
     """
     result = [None]*len(values)
     if len(values) < period:
@@ -178,8 +175,7 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
                 return False
             return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
 
-        max_iterations = 100  # Add a maximum iteration limit
-        for _ in range(max_iterations):
+        while True:
             hv_cluster = []
             mv_cluster = []
             lv_cluster = []
@@ -214,10 +210,6 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
 
             if stable_a and stable_b and stable_c:
                 return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
-
-        logging.warning("K-Means did not converge within the maximum number of iterations.")
-        return None, None, None, 0, 0, 0
-
     except Exception as e:
         logging.error(f"K-Means clustering failed: {e}", exc_info=True)
         return None, None, None, 0, 0, 0
@@ -333,20 +325,17 @@ def heartbeat_logging():
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
     """Check for trade signals based on SuperTrend indicators"""
-    global in_position, position_side, entry_price, historical_data_processed
+    global in_position, position_side, entry_price
 
-    if not historical_data_processed:
-        logging.info("Historical data not processed yet. Skipping signal check.")
-        return  # Exit early if historical data hasn't been processed
-
-    while True:  # Keep checking for signals indefinitely
+    while True:
         try:
             if len(close_array) == 0:
                 time.sleep(SIGNAL_CHECK_INTERVAL)
                 continue
 
-            i = len(close_array) - 1
+            i = len(close_array)-1
             t = time_array[i]
+
 
             # Gather signals
             p_dir = primary_direction[i]
@@ -367,7 +356,7 @@ def check_signals():
 
                 # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
                 bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
-           
+    
                 # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
                 bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
@@ -440,7 +429,7 @@ def check_signals():
 
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
-    global hv_new, mv_new, lv_new, historical_data_processed # Declare globals at the start of the function
+    global hv_new, mv_new, lv_new  # Declare globals at the start of the function
 
     if 'k' not in msg:
         return
@@ -568,9 +557,6 @@ def on_message_candle(msg):
             last_secondary_directions.append(secondary_direction[i])
             if len(last_secondary_directions) > 10:
                 last_secondary_directions.pop(0)
-        
-        # Check signals after processing the new candle
-        check_signals()
 
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
@@ -583,122 +569,6 @@ def start_binance_websocket():
         interval=BINANCE_INTERVAL
     )
     twm.join()  # Block here
-
-def fetch_historical_candles(symbol, interval, limit):
-    """Fetches historical klines from Binance."""
-    logging.info(f"Fetching {limit} historical candles from Binance for symbol {symbol}...")
-    try:
-        klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        logging.info(f"Fetched {len(klines)} historical candles.")
-        return klines
-    except Exception as e:
-        logging.error(f"Error fetching historical candles: {e}", exc_info=True)
-        raise  # Re-raise the exception to halt execution
-
-def process_historical_candles(klines):
-    """Processes historical klines and populates data arrays."""
-    global hv_new, mv_new, lv_new
-
-    logging.info("Processing historical candles...")
-
-    for kline in klines:
-        open_time = kline[0]
-        high_price = float(kline[2])
-        low_price = float(kline[3])
-        close_price = float(kline[4])
-
-        time_array.append(open_time)
-        high_array.append(high_price)
-        low_array.append(low_price)
-        close_array.append(close_price)
-
-    # Recompute ATR
-    new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-    atr_array.clear()
-    atr_array.extend(new_atr)
-    logging.info(f"ATR calculated from historical data. Last 5 ATR values: {atr_array[-5:]}")
-
-    # Adjust cluster_assignments length
-    while len(cluster_assignments) < len(close_array):
-        cluster_assignments.append(None)
-    while len(cluster_assignments) > len(close_array):
-        cluster_assignments.pop(0)
-
-    # Adjust primary/secondary arrays
-    needed_len = len(close_array)
-    def fix_arrays(st, di, ub, lb):
-        while len(st) < needed_len:
-            st.append(None)
-        while len(st) > needed_len:
-            st.pop(0)
-        while len(di) < needed_len:
-            di.append(None)
-        while len(di) > needed_len:
-            di.pop(0)
-        while len(ub) < needed_len:
-            ub.append(None)
-        while len(ub) > needed_len:
-            ub.pop(0)
-        while len(lb) < needed_len:
-            lb.append(None)
-        while len(lb) > needed_len:
-            lb.pop(0)
-
-    fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
-    fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
-    logging.info("Primary and secondary arrays adjusted.")
-
-    # Run K-Means with historical data
-    data_count = len(close_array)
-    if data_count >= TRAINING_DATA_PERIOD:
-        start_idx = data_count - TRAINING_DATA_PERIOD
-        vol_data = [x for x in atr_array[start_idx:] if x is not None]
-
-        if len(vol_data) == TRAINING_DATA_PERIOD:
-            upper_val = max(vol_data)
-            lower_val = min(vol_data)
-            hv_init = lower_val + (upper_val - lower_val) * HIGHVOL_PERCENTILE
-            mv_init = lower_val + (upper_val - lower_val) * MIDVOL_PERCENTILE
-            lv_init = lower_val + (upper_val - lower_val) * LOWVOL_PERCENTILE
-
-            hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
-            if hvf and mvf and lvf:
-                hv_new, mv_new, lv_new = hvf, mvf, lvf
-                logging.info(f"K-Means (Historical) Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
-
-                # Calculate Supertrend for all historical candles
-                for i in range(len(close_array)):
-                    assigned_centroid = None
-                    vol = atr_array[i]
-
-                    if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
-                        dA = abs(vol - hv_new)
-                        dB = abs(vol - mv_new)
-                        dC = abs(vol - lv_new)
-                        distances = [dA, dB, dC]
-                        c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
-                        cluster_assignments[i] = c_idx
-                        assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-                        logging.info(f"Candle {i}: Cluster assigned: {c_idx}, Centroid: {assigned_centroid:.4f}")
-
-                    if assigned_centroid is not None:
-                        compute_supertrend(
-                            i, PRIMARY_FACTOR, assigned_centroid,
-                            primary_supertrend, primary_direction,
-                            primary_upperBand, primary_lowerBand
-                        )
-                        compute_supertrend(
-                            i, SECONDARY_FACTOR, assigned_centroid,
-                            secondary_supertrend, secondary_direction,
-                            secondary_upperBand, secondary_lowerBand
-                        )
-                        logging.info(f"Candle {i}: Primary Supertrend Direction: {primary_direction[i]}, Secondary Supertrend Direction: {secondary_direction[i]}")
-                    else:
-                        logging.warning(f"Candle {i}: Assigned centroid is None. Skipping Supertrend calculation.")
-
-            else:
-                logging.warning("K-Means (Historical) did not finalize due to insufficient data or errors.")
-    logging.info("Historical data processing complete.")
 
 # ============== MAIN ==============
 if __name__ == "__main__":
@@ -715,16 +585,10 @@ if __name__ == "__main__":
     hb_thread.start()
     logging.info("Heartbeat logging thread started.")
 
-    # Fetch and process historical candles
-    historical_klines = fetch_historical_candles(BINANCE_SYMBOL, BINANCE_INTERVAL, MAX_CANDLES)
-    process_historical_candles(historical_klines)
-
-    # Indicate that historical data has been processed
-    historical_data_processed = True
-
-    # Check signals immediately after processing historical data
-    logging.info("Initial check signals after historical data")
-    check_signals()
+    # Start signals checking thread
+    signal_thread = threading.Thread(target=check_signals, daemon=True)
+    signal_thread.start()
+    logging.info("Signal checking thread started.")
 
     # Start Binance WebSocket
     try:
