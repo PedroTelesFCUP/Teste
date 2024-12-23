@@ -38,10 +38,10 @@ QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "5s"  # 1-minute bars
+BINANCE_INTERVAL = "1m"  # 1-minute bars
 
 # Strategy / logic parameters
-ATR_LEN = 20
+ATR_LEN = 10
 PRIMARY_FACTOR = 10.0      # SuperTrend factor for primary
 SECONDARY_FACTOR = 3.0   # SuperTrend factor for secondary
 TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
@@ -50,8 +50,8 @@ MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 5   # seconds
-SIGNAL_CHECK_INTERVAL = 4 # check signals every 1 second
+HEARTBEAT_INTERVAL = 30   # seconds
+SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
