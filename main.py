@@ -54,7 +54,7 @@ HEARTBEAT_INTERVAL = 30    # seconds
 SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
-MAX_CANDLES = 200
+MAX_CANDLES = 150
 
 # Number of candles to determine pullback pattern
 MAX_PULLBACK_CANDLES =20
