@@ -56,6 +56,9 @@ SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
 
+# Number of candles to determine pullback pattern
+MAX_PULLBACK_CANDLES =20
+
 # K-Means re-run logic
 CLUSTER_RUN_ONCE = True
 
@@ -344,13 +347,20 @@ def check_signals():
                 time.sleep(SIGNAL_CHECK_INTERVAL)
                 continue
 
-            # Check last 3 secondary directions for pattern
+            # Check last 3 secondary directions for pullback pattern
             if len(last_secondary_directions) >= 3:
+                # Extract last 3 directions
                 recent_3 = last_secondary_directions[-3:]
-                # LONG pattern => [1, -1, 1] secondary, p_dir=1, cluster=0 => high vol
-                bullish_bearish_bullish = (recent_3 == [1, -1, 1])
-                # SHORT pattern => [-1, 1, -1], p_dir=-1, cluster=0 => high vol
-                bearish_bearish_bearish = (recent_3 == [-1, 1, -1])
+                # Compute corresponding indices from the last 3 elements in close_array
+                indices = list(range(len(close_array) - 3, len(close_array)))
+
+                # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
+                bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+    
+                # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
+                bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+
+
 
                 # ============ LONG ENTRY ============
                 if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
