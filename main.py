@@ -51,7 +51,7 @@ LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
 HEARTBEAT_INTERVAL = 30    # seconds
-DATA_CHECK_INTERVAL = 5 # Check for new data every 5 seconds
+DATA_CHECK_INTERVAL = 20 # Check for new data every 20 seconds
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
@@ -326,18 +326,19 @@ def heartbeat_logging():
         time.sleep(1)
 
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
+# ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
     """Check for trade signals based on SuperTrend indicators"""
     global in_position, position_side, entry_price, last_processed_candle_time
 
     while True:
         try:
-            current_time = time.time()
+            current_time = pd.Timestamp.now(tz='UTC')
 
             # Check if there's new data to process
-            if len(time_array) > 0 and time_array[-1] > last_processed_candle_time:
+            if len(time_array) > 0:
                 i = len(close_array) - 1
-                t = time_array[i]
+                t = pd.to_datetime(time_array[i], unit='ms')
 
                 # Ensure we process each candle only once
                 if t > last_processed_candle_time:
@@ -358,8 +359,9 @@ def check_signals():
                         recent_3 = last_secondary_directions[-3:]
                         indices = list(range(len(close_array) - 3, len(close_array)))
 
-                        # LONG pattern: [1, -1, 1] within MAX_PULL
+                        # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
                         bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+
                         # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
                         bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
@@ -428,7 +430,6 @@ def check_signals():
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
 
         time.sleep(DATA_CHECK_INTERVAL)
-
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
     global hv_new, mv_new, lv_new, last_processed_candle_time  # Declare globals at the start of the function
