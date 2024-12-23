@@ -42,9 +42,9 @@ BINANCE_INTERVAL = "1m"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 10
-PRIMARY_FACTOR = 7.0      # SuperTrend factor for primary
-SECONDARY_FACTOR = 2.0    # SuperTrend factor for secondary
-TRAINING_DATA_PERIOD = 50  # Increased from 1 to 3
+PRIMARY_FACTOR = 7.5      # SuperTrend factor for primary
+SECONDARY_FACTOR = 2.5    # SuperTrend factor for secondary
+TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
