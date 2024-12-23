@@ -102,7 +102,7 @@ entry_price = None
 last_heartbeat_time = 0
 
 # For tracking last processed candle
-last_processed_candle_time = -1
+last_processed_candle_time = pd.Timestamp(0, unit='ms')
 
 # Flask Server
 app = Flask(__name__)
@@ -599,6 +599,9 @@ def process_historical_candles(klines):
         high_array.append(high_price)
         low_array.append(low_price)
         close_array.append(close_price)
+
+        # Update last processed candle time with the timestamp of the last historical candle
+        last_processed_candle_time = open_time_dt
 
         # Update last processed candle time
         if open_time_dt > last_processed_candle_time:
