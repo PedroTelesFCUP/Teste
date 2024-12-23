@@ -57,7 +57,7 @@ DATA_CHECK_INTERVAL = 5 # Check for new data every 5 seconds
 MAX_CANDLES = 200
 
 # Number of candles to determine pullback pattern
-MAX_PULLBACK_CANDLES = 20
+MAX_PULLBACK_CANDLES = 30
 
 # K-Means re-run logic
 CLUSTER_RUN_ONCE = True
