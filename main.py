@@ -38,7 +38,7 @@ QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "1m"  # 1-minute bars
+BINANCE_INTERVAL = "1s"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 10
@@ -50,8 +50,8 @@ MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 30   # seconds
-SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
+HEARTBEAT_INTERVAL = 1   # seconds
+SIGNAL_CHECK_INTERVAL = 0.5 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
@@ -237,7 +237,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         st_array[i] = upBand
         return
 
-    prevDir = dir_array[i-1]
+    prevDir = dir_array[i-1] if dir_array[i-1] is not None else 1 # Handle None values for prevDir
     prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
@@ -252,24 +252,23 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     else:
         upBand = prevUB
 
-    # If prevDir != -1 => last ST was upper band
-    wasUpper = (prevDir != -1)
-    if wasUpper:
-        # direction = -1 if close>upBand else 1
-        if close_array[i] > upBand:
-            dir_array[i] = -1
-        else:
-            dir_array[i] = 1
-    else:
-        # direction = 1 if close<downBand else -1
+    # *** Corrected Logic for Direction Calculation ***
+    if prevDir == 1:  # If the previous direction was up
         if close_array[i] < downBand:
-            dir_array[i] = 1
+            dir_array[i] = -1  # Current direction is down
         else:
-            dir_array[i] = -1
+            dir_array[i] = 1  # Current direction is still up
+    else:  # If the previous direction was down
+        if close_array[i] > upBand:
+            dir_array[i] = 1  # Current direction is up
+        else:
+            dir_array[i] = -1  # Current direction is still down
 
     st_array[i] = upBand if dir_array[i] == -1 else downBand
     ub_array[i] = upBand
     lb_array[i] = downBand
+    logging.info(f"    Candle {i}: upBand={upBand:.2f}, downBand={downBand:.2f}, prevUB={prevUB:.2f}, prevLB={prevLB:.2f}, dir={dir_array[i]:.2f}, ST={st_array[i]:.2f}")
+
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
 def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
@@ -323,109 +322,110 @@ def heartbeat_logging():
         time.sleep(1)
 
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
+# ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
     """Check for trade signals based on SuperTrend indicators"""
-    global in_position, position_side, entry_price
+    global in_position, position_side, entry_price, last_processed_candle_time
 
     while True:
         try:
-            if len(close_array) == 0:
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
+            current_time = pd.Timestamp.now(tz='UTC')
 
-            i = len(close_array)-1
-            t = time_array[i]
+            # Check if there's new data to process and if the system is ready
+            if len(time_array) > 0 and data_ready:
+                i = len(close_array) - 1
+                t = pd.to_datetime(time_array[i], unit='ms')
 
+                # Ensure we process each candle only once
+                if t > last_processed_candle_time:
+                    last_processed_candle_time = t
+                    logging.info(f"Processing new candle: {t}")
 
-            # Gather signals
-            p_dir = primary_direction[i]
-            s_dir = secondary_direction[i]
-            c_idx = cluster_assignments[i]
-            current_price = close_array[i]
+                    # Gather signals
+                    p_dir = primary_direction[i]
+                    s_dir = secondary_direction[i]
+                    c_idx = cluster_assignments[i] if clustering_ready else None
+                    current_price = close_array[i]
 
-            if p_dir is None or s_dir is None or c_idx is None:
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
+                    if p_dir is None or s_dir is None:
+                        continue  # Skip if any signal is missing
 
-            # Check last 3 secondary directions for pullback pattern
-            if len(last_secondary_directions) >= 3:
-                # Extract last 3 directions
-                recent_3 = last_secondary_directions[-3:]
-                # Compute corresponding indices from the last 3 elements in close_array
-                indices = list(range(len(close_array) - 3, len(close_array)))
+                    # Check last 3 secondary directions for pullback pattern
+                    if len(last_secondary_directions) >= 3:
+                        recent_3 = last_secondary_directions[-3:]
+                        indices = list(range(len(close_array) - 3, len(close_array)))
 
-                # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
-                bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
-    
-                # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
-                bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+                        # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
+                        bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
+                        # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
+                        bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
+                        # ============ LONG ENTRY ============
+                        if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
+                            # Stop-loss = current bar's low
+                            sl = low_array[i]
+                            # Distance from entry to SL
+                            dist = current_price - sl
+                            # Take-profit = entry + 1.5 * dist
+                            tp = current_price + (1.5 * dist)
+                            logging.info("Pullback BUY triggered!")
+                            execute_trade(
+                                side="buy",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "long"
+                            entry_price = current_price
 
-                # ============ LONG ENTRY ============
-                if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
-                    # Stop-loss = current bar's low
-                    sl = low_array[i]
-                    # Distance from entry to SL
-                    dist = current_price - sl
-                    # Take-profit = entry + 1.5 * dist
-                    tp = current_price + (1.5 * dist)
-                    logging.info("Pullback BUY triggered!")
-                    execute_trade(
-                        side="buy",
-                        qty=QTY,
-                        symbol=SYMBOL_ALPACA,
-                        stop_loss=round(sl, 2),
-                        take_profit=round(tp, 2)
-                    )
-                    in_position = True
-                    position_side = "long"
-                    entry_price = current_price
+                        # ============ SHORT ENTRY ============
+                        if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
+                            # Stop-loss = current bar's high
+                            sl = high_array[i]
+                            # Distance from entry to SL
+                            dist = sl - current_price
+                            # Take-profit = entry - 1.5 * dist
+                            tp = current_price - (1.5 * dist)
+                            logging.info("Pullback SHORT triggered!")
+                            execute_trade(
+                                side="sell",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "short"
+                            entry_price = current_price
 
-                # ============ SHORT ENTRY ============
-                if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
-                    # Stop-loss = current bar's high
-                    sl = high_array[i]
-                    dist = sl - current_price
-                    # Take-profit = entry - 1.5 * dist
-                    tp = current_price - (1.5 * dist)
-                    logging.info("Pullback SHORT triggered!")
-                    execute_trade(
-                        side="sell",
-                        qty=QTY,
-                        symbol=SYMBOL_ALPACA,
-                        stop_loss=round(sl, 2),
-                        take_profit=round(tp, 2)
-                    )
-                    in_position = True
-                    position_side = "short"
-                    entry_price = current_price
+                    # Exit Logic
+                    if in_position:
+                        if position_side == "long" and p_dir == -1:
+                            logging.info("Primary turned bearish. Closing LONG position.")
+                            execute_trade("sell", QTY, SYMBOL_ALPACA)
+                            in_position = False
+                            position_side = None
+                            entry_price = None
+                        elif position_side == "short" and p_dir == 1:
+                            logging.info("Primary turned bullish. Closing SHORT position.")
+                            execute_trade("buy", QTY, SYMBOL_ALPACA)
+                            in_position = False
+                            position_side = None
+                            entry_price = None
 
-            # Exit Logic
-            if in_position:
-                if position_side == "long" and p_dir == -1:
-                    logging.info("Primary turned bearish. Closing LONG position.")
-                    execute_trade("sell", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    position_side = None
-                    entry_price = None
-                elif position_side == "short" and p_dir == 1:
-                    logging.info("Primary turned bullish. Closing SHORT position.")
-                    execute_trade("buy", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    position_side = None
-                    entry_price = None
-
-            # Update last_secondary_directions based on current secondary direction
-            if s_dir is not None:
-                last_secondary_directions.append(s_dir)
-                if len(last_secondary_directions) > 10:
-                    last_secondary_directions.pop(0)
+                    # Update last_secondary_directions based on current secondary direction
+                    if s_dir is not None:
+                        last_secondary_directions.append(s_dir)
+                        if len(last_secondary_directions) > 10:
+                            last_secondary_directions.pop(0)
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
 
-        time.sleep(SIGNAL_CHECK_INTERVAL)
+        time.sleep(DATA_CHECK_INTERVAL)
 
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
