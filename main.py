@@ -41,9 +41,9 @@ BINANCE_SYMBOL = "BTCUSDT"
 BINANCE_INTERVAL = "1s"  # 1-minute bars
 
 # Strategy / logic parameters
-ATR_LEN = 10
+ATR_LEN = 30
 PRIMARY_FACTOR = 10.0      # SuperTrend factor for primary
-SECONDARY_FACTOR = 1.5    # SuperTrend factor for secondary
+SECONDARY_FACTOR = 2   # SuperTrend factor for secondary
 TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
@@ -362,7 +362,7 @@ def check_signals():
                         bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
                         # ============ LONG ENTRY ============
-                        if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
+                        if (not in_position) and bullish_bearish_bullish and p_dir == 1 # and c_idx == 0:
                             # Stop-loss = current bar's low
                             sl = low_array[i]
                             # Distance from entry to SL
@@ -382,7 +382,7 @@ def check_signals():
                             entry_price = current_price
 
                         # ============ SHORT ENTRY ============
-                        if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
+                        if (not in_position) and bearish_bearish_bearish and p_dir == -1 # and c_idx == 0:
                             # Stop-loss = current bar's high
                             sl = high_array[i]
                             # Distance from entry to SL
@@ -425,7 +425,7 @@ def check_signals():
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
 
-        time.sleep(DATA_CHECK_INTERVAL)
+        time.sleep(SIGNAL_CHECK_INTERVAL)
 
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
