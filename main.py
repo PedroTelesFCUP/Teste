@@ -332,7 +332,7 @@ def check_signals():
             current_time = pd.Timestamp.now(tz='UTC')
 
             # Check if there's new data to process and if the system is ready
-            if len(time_array) > 0 and data_ready:
+            if len(time_array) > 0:
                 i = len(close_array) - 1
                 t = pd.to_datetime(time_array[i], unit='ms')
 
