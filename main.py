@@ -42,16 +42,16 @@ BINANCE_INTERVAL = "1m"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 10
-PRIMARY_FACTOR = 7.5     # SuperTrend factor for primary
-SECONDARY_FACTOR = 2.5     # SuperTrend factor for secondary
-TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
+PRIMARY_FACTOR = 8     # SuperTrend factor for primary
+SECONDARY_FACTOR = 3     # SuperTrend factor for secondary
+TRAINING_DATA_PERIOD = 150  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
 HEARTBEAT_INTERVAL = 30    # seconds
-DATA_CHECK_INTERVAL = 20 # Check for new data every 20 seconds
+DATA_CHECK_INTERVAL = 2 # Check for new data every 20 seconds
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
