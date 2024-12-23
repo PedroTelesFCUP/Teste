@@ -362,7 +362,7 @@ def check_signals():
                         bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
                         # ============ LONG ENTRY ============
-                        if (not in_position) and bullish_bearish_bullish and p_dir == 1 # and c_idx == 0:
+                        if (not in_position) and bullish_bearish_bullish and p_dir == 1: # and c_idx == 0:
                             # Stop-loss = current bar's low
                             sl = low_array[i]
                             # Distance from entry to SL
@@ -382,7 +382,7 @@ def check_signals():
                             entry_price = current_price
 
                         # ============ SHORT ENTRY ============
-                        if (not in_position) and bearish_bearish_bearish and p_dir == -1 # and c_idx == 0:
+                        if (not in_position) and bearish_bearish_bearish and p_dir == -1: # and c_idx == 0:
                             # Stop-loss = current bar's high
                             sl = high_array[i]
                             # Distance from entry to SL
