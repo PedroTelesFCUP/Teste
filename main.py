@@ -37,7 +37,7 @@ QTY = 0.001               # Example size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "30s"  # Candle interval: 1m, 5m, 15m, etc.
+BINANCE_INTERVAL = "1m"  # Candle interval: 1m, 5m, 15m, etc.
 
 # Strategy / logic parameters
 ATR_LEN = 10
