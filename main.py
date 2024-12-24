@@ -416,11 +416,7 @@ def check_signals():
                     position_side = None
                     entry_price = None
 
-            # Update last_secondary_directions based on current secondary direction
-            if s_dir is not None:
-                last_secondary_directions.append(s_dir)
-                if len(last_secondary_directions) > 10:
-                    last_secondary_directions.pop(0)
+
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
