@@ -218,14 +218,12 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     """
     Replicates the incremental Pine Script SuperTrend logic.
     """
-    if assigned_atr is None:
-        # No volatility => carry forward previous values
-        st_array[i] = st_array[i-1] if i > 0 else None
-        dir_array[i] = dir_array[i-1] if i > 0 else 1
-        ub_array[i] = ub_array[i-1] if i > 0 else None
-        lb_array[i] = lb_array[i-1] if i > 0 else None
-        logging.warning(f"Skipping computation for candle {i} due to missing ATR.")
-        return
+
+    st_array[i] = st_array[i-1] if i > 0 else None
+    dir_array[i] = dir_array[i-1] if i > 0 else 1
+    ub_array[i] = ub_array[i-1] if i > 0 else None
+    lb_array[i] = lb_array[i-1] if i > 0 else None
+
 
     hl2 = (high_array[i] + low_array[i]) / 2.0
     upBand = hl2 + factor * assigned_atr
