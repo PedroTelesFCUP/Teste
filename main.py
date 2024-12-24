@@ -318,6 +318,7 @@ def heartbeat_logging():
                 msg += f"ATR: {atr}\n"
                 msg += f"PriST: {pri_st}\n"
                 msg += f"SecST: {sec_st}\n"
+                msg += f"Secondary Directions: {secondary_direction[-3:] if len(secondary_direction) >= 3 else secondary_direction}\n"
                 msg += f"In Position: {in_position} ({position_side})\n"
                 msg += f"Entry Price: {entry_price}\n"
                 msg += "=============="
