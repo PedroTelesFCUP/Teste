@@ -338,6 +338,9 @@ def check_signals():
             current_time = pd.Timestamp.now(tz='UTC')
 
             with data_lock:  # Acquire lock *only* to read data
+                p_dir = None  # Default values
+                s_dir = None
+                c_idx = None
                 if len(time_array) > 0:
                     i = len(close_array) - 1
                     t = pd.to_datetime(time_array[i], unit='ms', utc=True)
