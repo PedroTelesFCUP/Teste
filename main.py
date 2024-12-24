@@ -89,6 +89,9 @@ secondary_direction = []
 secondary_upperBand = []
 secondary_lowerBand = []
 
+# Start heartbeat
+last_heartbeat_time = 0
+
 # We track direction flips in secondary to detect bullish->bearish->bullish
 last_secondary_directions = []
 
