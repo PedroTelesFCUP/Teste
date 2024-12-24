@@ -588,4 +588,3 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Binance WebSocket error: {e}", exc_info=True)
         sys.exit(1)
-
