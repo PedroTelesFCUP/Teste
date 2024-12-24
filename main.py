@@ -67,12 +67,6 @@ alpaca_api = AlpacaREST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 binance_client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
 
 # ============== GLOBAL DATA STRUCTURES ==============
-time_array = []
-high_array = []
-low_array = []
-close_array = []
-atr_array = []
-cluster_assignments = []
 
 # K-Means centroids for High/Medium/Low once stable
 hv_new = None
