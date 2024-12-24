@@ -407,8 +407,7 @@ def check_signals():
 
         time.sleep(DATA_CHECK_INTERVAL)
 # ============== WEBSOCKET CALLBACK ==============
-def on_message_candle(msg):
-    global hv_new, mv_new, lv_new, last_processed_candle_time
+   global time_array, high_array, low_array, close_array, atr_array, cluster_assignments, primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand, secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand, last_secondary_directions, last_processed_candle_time
 
     if 'k' not in msg:
         return
@@ -425,7 +424,8 @@ def on_message_candle(msg):
 
         with data_lock:
             # Initialize arrays if they're empty:
-            if not time_array:
+            if 'time_array' not in globals() or not time_array: #This is the fix
+                global time_array, high_array, low_array, close_array, atr_array, cluster_assignments, primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand, secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand, last_secondary_directions
                 time_array = []
                 high_array = []
                 low_array = []
@@ -444,7 +444,7 @@ def on_message_candle(msg):
                 logging.info("Arrays were not initialized. Initializing.")
 
             # Append new data ONLY if it's a new candle:
-            if candle_time > pd.to_datetime(time_array[-1], unit='ms', utc=True) if time_array else True:
+            if time_array and candle_time > pd.to_datetime(time_array[-1], unit='ms', utc=True) or not time_array:
                 time_array.append(open_time)
                 high_array.append(high_price)
                 low_array.append(low_price)
@@ -456,6 +456,7 @@ def on_message_candle(msg):
                     low_array.pop(0)
                     close_array.pop(0)
                 last_processed_candle_time = candle_time
+
 
 
         if new_time_array:  # Only calculate and update if we have new data
