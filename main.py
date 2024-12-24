@@ -535,7 +535,7 @@ def on_message_candle(msg):
                 secondary_upperBand, secondary_lowerBand
             )
             
-        check_signals(current_price, p_dir, s_dir, c_idx)
+        check_signals(close_price, p_dir, s_dir, c_idx)
 
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
