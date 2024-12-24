@@ -50,8 +50,8 @@ MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 30   # seconds
-SIGNAL_CHECK_INTERVAL = 10 # check signals every 1 second
+HEARTBEAT_INTERVAL = 31   # seconds
+SIGNAL_CHECK_INTERVAL = 7 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
