@@ -46,10 +46,6 @@ HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
-# Time window for valid trades (example)
-# We'll use Python's datetime -> timestamp in ms
-START_TIME = datetime(2024, 12, 1, 9, 30).timestamp() * 1000  # 9:30
-END_TIME   = datetime(2024, 12, 17, 16, 0).timestamp() * 1000 # 16:00
 
 # Trading signals refresh intervals
 SIGNAL_CHECK_INTERVAL = 1.0  # seconds
