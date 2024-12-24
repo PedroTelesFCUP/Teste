@@ -67,14 +67,8 @@ alpaca_api = AlpacaREST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 binance_client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
 
 # ============== GLOBAL DATA STRUCTURES ==============
-
-# K-Means centroids for High/Medium/Low once stable
-hv_new = None
-mv_new = None
-lv_new = None
-
-
-data_lock = threading.Lock()
+# Global variable declarations and initializations (at the module level):
+global time_array, high_array, low_array, close_array, atr_array, cluster_assignments, primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand, secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand, last_secondary_directions, last_processed_candle_time, hv_new, mv_new, lv_new, in_position, position_side, entry_price, last_heartbeat_time
 
 time_array = []
 high_array = []
@@ -91,7 +85,14 @@ secondary_direction = []
 secondary_upperBand = []
 secondary_lowerBand = []
 last_secondary_directions = []
+last_processed_candle_time = pd.Timestamp(0, unit='ms')
 
+# K-Means centroids for High/Medium/Low once stable
+hv_new = None
+mv_new = None
+lv_new = None
+
+data_lock = threading.Lock()
 
 # Position management
 in_position = False    # True if in a trade
@@ -100,9 +101,6 @@ entry_price = None
 
 # For logging
 last_heartbeat_time = 0
-
-# For tracking last processed candle
-last_processed_candle_time = pd.Timestamp(0, unit='ms')
 
 # Flask Server
 app = Flask(__name__)
@@ -407,7 +405,8 @@ def check_signals():
 
         time.sleep(DATA_CHECK_INTERVAL)
 # ============== WEBSOCKET CALLBACK ==============
-   global time_array, high_array, low_array, close_array, atr_array, cluster_assignments, primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand, secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand, last_secondary_directions, last_processed_candle_time
+def on_message_candle(msg):
+    global last_processed_candle_time  # Only need to declare the ones modified in the function
 
     if 'k' not in msg:
         return
@@ -423,27 +422,6 @@ def check_signals():
         candle_time = pd.to_datetime(open_time, unit='ms', utc=True)
 
         with data_lock:
-            # Initialize arrays if they're empty:
-            if 'time_array' not in globals() or not time_array: #This is the fix
-                global time_array, high_array, low_array, close_array, atr_array, cluster_assignments, primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand, secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand, last_secondary_directions
-                time_array = []
-                high_array = []
-                low_array = []
-                close_array = []
-                atr_array = []
-                cluster_assignments = []
-                primary_supertrend = []
-                primary_direction = []
-                primary_upperBand = []
-                primary_lowerBand = []
-                secondary_supertrend = []
-                secondary_direction = []
-                secondary_upperBand = []
-                secondary_lowerBand = []
-                last_secondary_directions = []
-                logging.info("Arrays were not initialized. Initializing.")
-
-            # Append new data ONLY if it's a new candle:
             if time_array and candle_time > pd.to_datetime(time_array[-1], unit='ms', utc=True) or not time_array:
                 time_array.append(open_time)
                 high_array.append(high_price)
@@ -457,18 +435,15 @@ def check_signals():
                     close_array.pop(0)
                 last_processed_candle_time = candle_time
 
-
-
-        if new_time_array:  # Only calculate and update if we have new data
-            # Now, perform the calculations WITHOUT holding the lock
-            new_atr = compute_atr(new_high_array, new_low_array, new_close_array, ATR_LEN)
+        if time_array:  # Calculations outside the lock:
+            new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
             new_cluster_assignments = cluster_assignments[:]
-            while len(new_cluster_assignments) < len(new_close_array):
+            while len(new_cluster_assignments) < len(close_array):
                 new_cluster_assignments.append(None)
-            while len(new_cluster_assignments) > len(new_close_array):
+            while len(new_cluster_assignments) > len(close_array):
                 new_cluster_assignments.pop(0)
 
-            needed_len = len(new_close_array)
+            needed_len = len(close_array)
             new_primary_supertrend = primary_supertrend[:]
             new_primary_direction = primary_direction[:]
             new_primary_upperBand = primary_upperBand[:]
@@ -477,6 +452,7 @@ def check_signals():
             new_secondary_direction = secondary_direction[:]
             new_secondary_upperBand = secondary_upperBand[:]
             new_secondary_lowerBand = secondary_lowerBand[:]
+
             def fix_arrays(st, di, ub, lb, new_st, new_di, new_ub, new_lb):
                 while len(new_st) < needed_len:
                     new_st.append(None)
@@ -497,30 +473,13 @@ def check_signals():
 
             fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand,new_primary_supertrend, new_primary_direction, new_primary_upperBand, new_primary_lowerBand)
             fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand, new_secondary_supertrend, new_secondary_direction, new_secondary_upperBand, new_secondary_lowerBand)
-            data_count = len(new_close_array)
-            if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
-                start_idx = data_count - TRAINING_DATA_PERIOD
-                vol_data = [x for x in new_atr[start_idx:] if x is not None]
-                if len(vol_data) == TRAINING_DATA_PERIOD:
-                    upper_val = max(vol_data)
-                    lower_val = min(vol_data)
-                    hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
-                    mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
-                    lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
 
-                    hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
-                    if hvf and mvf and lvf:
-                        hv_new, mv_new, lv_new = hvf, mvf, lvf
-                        logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
-                    else:
-                        logging.warning("K-Means did not finalize due to insufficient data or errors.")
-            i = len(new_close_array)-1
+            i = len(close_array) - 1
             assigned_centroid = None
-            if len(new_atr) > i:
-                vol = new_atr[i]
+            if len(atr_array) > i:
+                vol = atr_array[i]
             else:
                 vol = None
-
             if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
                 dA = abs(vol - hv_new)
                 dB = abs(vol - mv_new)
@@ -528,7 +487,6 @@ def check_signals():
                 distances = [dA, dB, dC]
                 c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
                 assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-
             if assigned_centroid is not None:
                 compute_supertrend(
                     i, PRIMARY_FACTOR, assigned_centroid,
@@ -552,10 +510,8 @@ def check_signals():
                     new_secondary_supertrend, new_secondary_direction,
                     new_secondary_upperBand, new_secondary_lowerBand
                 )
+
             with data_lock:
-                time_array = new_time_array
-                high_array = new_high_array
-                close_array = new_close_array
                 atr_array = new_atr
                 cluster_assignments = new_cluster_assignments
                 primary_supertrend = new_primary_supertrend
@@ -566,12 +522,11 @@ def check_signals():
                 secondary_direction = new_secondary_direction
                 secondary_upperBand = new_secondary_upperBand
                 secondary_lowerBand = new_secondary_lowerBand
-                if new_secondary_direction[i] is not None:
+                if new_secondary_direction and len(new_secondary_direction)>i and new_secondary_direction[i] is not None:
                     last_secondary_directions.append(new_secondary_direction[i])
                     while len(last_secondary_directions) > 35:
                         last_secondary_directions.pop(0)
                 last_processed_candle_time = candle_time
-
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
     logging.info("Starting Binance WebSocket...")
