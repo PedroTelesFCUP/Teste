@@ -41,6 +41,7 @@ ATR_LEN = 10
 PRIMARY_FACTOR = 3.0      # SuperTrend factor for primary signal
 SECONDARY_FACTOR = 8.0    # SuperTrend factor for secondary signal
 TRAINING_DATA_PERIOD = 100
+MAX_CANDLES = 150
 MAX_PULLBACK_CANDLES = 30
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
