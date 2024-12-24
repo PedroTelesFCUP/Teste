@@ -554,7 +554,7 @@ def on_message_candle(msg):
         # Update last_secondary_directions
         if secondary_direction[i] is not None:
             last_secondary_directions.append(secondary_direction[i])
-            if len(last_secondary_directions) > 10:
+            if len(last_secondary_directions) > 35:
                 last_secondary_directions.pop(0)
 
 # ============== BINANCE WEBSOCKET ==============
