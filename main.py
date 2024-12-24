@@ -7,7 +7,7 @@ import logging
 import threading
 import pandas as pd
 from datetime import datetime
-
+from flask import Flask, send_file
 # 3rd-party libraries
 from binance import ThreadedWebsocketManager
 from binance.client import Client
@@ -18,7 +18,10 @@ LOG_LEVEL = logging.INFO
 logging.basicConfig(
     level=LOG_LEVEL,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[
+        logging.FileHandler("bot_logs.log"),  # Save logs to file
+        logging.StreamHandler(sys.stdout)                       # Output logs to console
+    ]
 )
 
 # Environment variables / credentials
@@ -92,6 +95,21 @@ last_secondary_directions = []
 # Simple position tracking
 in_position = False
 entry_price = None
+
+# Flask Server
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running!", 200
+
+@app.route('/logs')
+def download_logs():
+    try:
+        # Assuming logs are stored in the current directory
+        return send_file("bot_logs.log", as_attachment=True)
+    except FileNotFoundError:
+        return "Log file not found.", 404
 
 # ============== HELPER FUNCTIONS ==============
 
@@ -557,6 +575,12 @@ def check_signals():
 if __name__ == "__main__":
     logging.info("Starting the dual SuperTrend strategy with K-Means clustering...")
 
+    # Flask thread 
+    flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
+    flask_thread.daemon = True
+    flask_thread.start()
+    logging.info("Flask monitoring started on port 8080.")
+    
     # Start a thread for signals checking
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
