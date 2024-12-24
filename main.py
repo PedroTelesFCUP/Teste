@@ -41,7 +41,7 @@ BINANCE_SYMBOL = "BTCUSDT"
 BINANCE_INTERVAL = "1m"  # 1-minute bars
 
 # Strategy / logic parameters
-ATR_LEN = 10
+ATR_LEN = 15
 PRIMARY_FACTOR = 8.0      # SuperTrend factor for primary
 SECONDARY_FACTOR = 3.0    # SuperTrend factor for secondary
 TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
@@ -51,13 +51,13 @@ LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
 HEARTBEAT_INTERVAL = 31   # seconds
-SIGNAL_CHECK_INTERVAL = 7 # check signals every 1 second
+SIGNAL_CHECK_INTERVAL = 14 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
 
 # Number of candles to determine pullback pattern
-MAX_PULLBACK_CANDLES =20
+MAX_PULLBACK_CANDLES =30
 
 # K-Means re-run logic
 CLUSTER_RUN_ONCE = True
@@ -401,22 +401,6 @@ def check_signals():
                     position_side = "short"
                     entry_price = current_price
 
-            # Exit Logic
-            if in_position:
-                if position_side == "long" and p_dir == -1:
-                    logging.info("Primary turned bearish. Closing LONG position.")
-                    execute_trade("sell", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    position_side = None
-                    entry_price = None
-                elif position_side == "short" and p_dir == 1:
-                    logging.info("Primary turned bullish. Closing SHORT position.")
-                    execute_trade("buy", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    position_side = None
-                    entry_price = None
-
-
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
@@ -551,7 +535,7 @@ def on_message_candle(msg):
         # Update last_secondary_directions
         if secondary_direction[i] is not None:
             last_secondary_directions.append(secondary_direction[i])
-            if len(last_secondary_directions) > 30:
+            if len(last_secondary_directions) > 35:
                 last_secondary_directions.pop(0)
 
 # ============== BINANCE WEBSOCKET ==============
