@@ -94,6 +94,7 @@ secondary_lowerBand = []
 
 # Start heartbeat
 last_heartbeat_time = 0
+lock = threading.Lock()  # For thread-safe access to global arrays
 
 # We track direction flips in secondary to detect bullish->bearish->bullish
 last_secondary_directions = []
@@ -209,214 +210,60 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         if stable_a and stable_b and stable_c:
             return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
 
-def compute_supertrend(
-    i, 
-    factor, 
-    assigned_atr, 
-    st_array, 
-    dir_array, 
-    ub_array, 
-    lb_array
-):
-    """
-    Candle-by-candle SuperTrend replication from Pine code:
-      upperBand = hl2 + factor * ATR
-      lowerBand = hl2 - factor * ATR
-      Then "band persistence" logic:
-        lowerBand := lowerBand > prevLowerBand or close[1]<prevLowerBand ? lowerBand : prevLowerBand
-        upperBand := upperBand < prevUpperBand or close[1]>prevUpperBand ? upperBand : prevUpperBand
-      direction logic:
-        if na(atr[1]):
-            direction=1
-        else if prevSuperTrend==prevUpperBand:
-            direction= close>upperBand ? -1 : 1
+def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
+    with lock:
+        length = len(close_array)
+        if i<0 or i>=length:
+            return
+        if assigned_atr is None:
+            st_array[i] = st_array[i-1] if i>0 else None
+            dir_array[i] = dir_array[i-1] if i>0 else 1
+            ub_array[i] = ub_array[i-1] if i>0 else None
+            lb_array[i] = lb_array[i-1] if i>0 else None
+            return
+
+        hl2 = (high_array[i] + low_array[i]) / 2.0
+        upBand = hl2 + factor * assigned_atr
+        downBand = hl2 - factor * assigned_atr
+
+        if i == 0:
+            dir_array[i] = 1
+            ub_array[i] = upBand
+            lb_array[i] = downBand
+            st_array[i] = upBand
+            return
+
+        prevDir = dir_array[i-1]
+        prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
+        prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
+
+        if (downBand > prevLB or close_array[i-1]<prevLB):
+            downBand = downBand
         else:
-            direction= close<lowerBand ? 1 : -1
-      superTrend= direction == -1 ? lowerBand : upperBand
-    We store results in st_array, dir_array, ub_array, lb_array.
-    """
-    if assigned_atr is None:
-        # Before we have assigned_atr, just carry forward
-        st_array[i] = st_array[i-1] if i>0 else None
-        dir_array[i] = dir_array[i-1] if i>0 else 1
-        ub_array[i] = ub_array[i-1] if i>0 else None
-        lb_array[i] = lb_array[i-1] if i>0 else None
-        return
+            downBand = prevLB
 
-    hl2 = (high_array[i] + low_array[i]) / 2.0
-    upBand = hl2 + factor * assigned_atr
-    downBand = hl2 - factor * assigned_atr
+        if (upBand < prevUB or close_array[i-1]>prevUB):
+            upBand = upBand
+        else:
+            upBand = prevUB
 
-    if i == 0:
-        # First candle with valid assigned_atr
-        dir_array[i] = 1
+        wasUpper = (prevDir != -1)
+        if wasUpper:
+            if close_array[i] > upBand:
+                dir_array[i] = -1
+            else:
+                dir_array[i] = 1
+        else:
+            if close_array[i] < downBand:
+                dir_array[i] = 1
+            else:
+                dir_array[i] = -1
+
+        st_array[i] = downBand if dir_array[i] == -1 else upBand
         ub_array[i] = upBand
         lb_array[i] = downBand
-        # superTrend = lowerBand if direction==-1 else upperBand if direction==-1 else ?
-        # Actually from the Pine code, if na(atr[1]) => direction=1 => superTrend= upperBand
-        st_array[i] = upBand
-        return
 
-    # We have a previous candle
-    prevST = st_array[i-1]
-    prevDir = dir_array[i-1]
-    prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
-    prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-    # Pine band continuity
-    # lowerBand = lowerBand > prevLB or close[i-1]<prevLB ? lowerBand : prevLB
-    if (downBand > prevLB or close_array[i-1]<prevLB):
-        downBand = downBand
-    else:
-        downBand = prevLB
-
-    # upperBand = upperBand < prevUB or close[i-1]>prevUB ? upperBand : prevUB
-    if (upBand < prevUB or close_array[i-1]>prevUB):
-        upBand = upBand
-    else:
-        upBand = prevUB
-
-    # direction logic
-    # if na(atr[1]) => direction=1 (handled on i=0)
-    # else if prevSuperTrend==prevUpperBand => direction= close>upperBand ? -1 : 1
-    # else => direction= close<lowerBand ? 1 : -1
-    # But in Pine, we check if prevST was the upperBand or lowerBand:
-    # If direction was -1 => previous ST was lowerBand, else upperBand
-    wasUpper = (prevDir != -1)  # If direction != -1 => ST was upperBand
-    if wasUpper:
-        # direction = -1 if close>upBand else 1
-        if close_array[i] > upBand:
-            dir_array[i] = -1
-        else:
-            dir_array[i] = 1
-    else:
-        # direction = 1 if close<downBand else -1
-        if close_array[i] < downBand:
-            dir_array[i] = 1
-        else:
-            dir_array[i] = -1
-
-    # superTrend = direction == -1 ? lowerBand : upperBand
-    if dir_array[i] == -1:
-        st_array[i] = downBand
-    else:
-        st_array[i] = upBand
-
-    ub_array[i] = upBand
-    lb_array[i] = downBand
-
-# ============== REAL-TIME DATA (BINANCE WEBSOCKET) ==============
-def on_message_candle(msg):
-    global hv_new, mv_new, lv_new  # Declare globals at the start of the function
-
-    if 'k' not in msg:
-        return
-
-    k = msg['k']
-    is_final = k['x']
-    close_price = float(k['c'])
-    high_price = float(k['h'])
-    low_price = float(k['l'])
-    open_time = k['t']
-
-    if is_final:
-        # Append new candle
-        time_array.append(open_time)
-        high_array.append(high_price)
-        low_array.append(low_price)
-        close_array.append(close_price)
-
-        # Trim to MAX_CANDLES
-        if len(time_array) > MAX_CANDLES:
-            time_array.pop(0)
-            high_array.pop(0)
-            low_array.pop(0)
-            close_array.pop(0)
-
-        # Recompute ATR
-        new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-        atr_array.clear()
-        atr_array.extend(new_atr)
-
-        # Trim atr_array if necessary
-        while len(atr_array) > len(close_array):
-            atr_array.pop(0)
-
-        # Adjust cluster_assignments length
-        while len(cluster_assignments) < len(close_array):
-            cluster_assignments.append(None)
-        while len(cluster_assignments) > len(close_array):
-            cluster_assignments.pop(0)
-
-        # Adjust primary/secondary arrays
-        needed_len = len(close_array)
-        def fix_arrays(st, di, ub, lb):
-            while len(st) < needed_len:
-                st.append(None)
-            while len(st) > needed_len:
-                st.pop(0)
-            while len(di) < needed_len:
-                di.append(None)
-            while len(di) > needed_len:
-                di.pop(0)
-            while len(ub) < needed_len:
-                ub.append(None)
-            while len(ub) > needed_len:
-                ub.pop(0)
-            while len(lb) < needed_len:
-                lb.append(None)
-            while len(lb) > needed_len:
-                lb.pop(0)
-
-        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
-        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
-
-        # Possibly run K-Means
-        data_count = len(close_array)
-        if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
-            start_idx = data_count - TRAINING_DATA_PERIOD
-            vol_data = [x for x in atr_array[start_idx:] if x is not None]
-            if len(vol_data) == TRAINING_DATA_PERIOD:
-                upper_val = max(vol_data)
-                lower_val = min(vol_data)
-                hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
-                mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
-                lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
-
-                hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
-                hv_new, mv_new, lv_new = hvf, mvf, lvf
-                logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
-
-        # Assign cluster & compute supertrend for this bar
-        i = len(close_array)-1
-        assigned_centroid = None
-        vol = atr_array[i]
-
-        if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
-            dA = abs(vol - hv_new)
-            dB = abs(vol - mv_new)
-            dC = abs(vol - lv_new)
-            distances = [dA, dB, dC]
-            c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
-            cluster_assignments[i] = c_idx
-            assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-
-        compute_supertrend(
-            i, PRIMARY_FACTOR, assigned_centroid,
-            primary_supertrend, primary_direction,
-            primary_upperBand, primary_lowerBand
-        )
-        compute_supertrend(
-            i, SECONDARY_FACTOR, assigned_centroid,
-            secondary_supertrend, secondary_direction,
-            secondary_upperBand, secondary_lowerBand
-        )
-
-        # Update last_secondary_directions
-        if secondary_direction[i] is not None:
-            last_secondary_directions.append(secondary_direction[i])
-            if len(last_secondary_directions) > 30:
-                last_secondary_directions.pop(0)
 
 
 
@@ -445,126 +292,223 @@ def heartbeat_logging():
     while True:
         now = time.time()
         if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
-            if len(close_array) > 0:
-                i = len(close_array)-1
-                msg = "\n=== Heartbeat ===\n"
-                msg += f"Last Price: {close_array[i]:.2f}\n"
-                msg += f"Primary Dir: {primary_direction[i]}\n"
-                msg += f"Secondary Dir: {secondary_direction[i]}\n"
-                msg += f"Cluster: {cluster_assignments[i]} (0=High,1=Med,2=Low)\n"
-                msg += f"ATR: {atr_array[i] if atr_array[i] else 'N/A'}\n"
-                msg += f"PriST: {primary_supertrend[i] if primary_supertrend[i] else 'N/A'}\n"
-                msg += f"SecST: {secondary_supertrend[i] if secondary_supertrend[i] else 'N/A'}\n"
-                msg += f"In Position: {in_position} ({position_side})\n"
-                msg += f"Entry Price: {entry_price}\n"
-                msg +=   "=============="
-                logging.info(msg)
+            with lock:
+                if len(close_array) == 0:
+                    logging.info("No data yet.")
+                else:
+                    i = len(close_array)-1
+                    msg = "\n=== Heartbeat ===\n"
+                    msg += f"Last Price: {close_array[i]:.2f}\n"
+                    p_dir = primary_direction[i] if i<len(primary_direction) else None
+                    s_dir = secondary_direction[i] if i<len(secondary_direction) else None
+                    c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
+                    msg += f"Primary Dir: {p_dir}\n"
+                    msg += f"Secondary Dir: {s_dir}\n"
+                    msg += f"Cluster: {c_idx if c_idx is not None else 'None'} (0=High,1=Med,2=Low)\n"
+                    last_atr = atr_array[i] if i<len(atr_array) else None
+                    msg += f"ATR: {last_atr if last_atr is not None else 'N/A'}\n"
+                    pri_st = primary_supertrend[i] if i<len(primary_supertrend) else None
+                    sec_st = secondary_supertrend[i] if i<len(secondary_supertrend) else None
+                    msg += f"PriST: {pri_st if pri_st else 'N/A'}\n"
+                    msg += f"SecST: {sec_st if sec_st else 'N/A'}\n"
+                    msg += f"In Position: {in_position} ({position_side})\n"
+                    msg += f"Entry Price: {entry_price}\n"
+                    msg +=   "=============="
+                    logging.info(msg)
             last_heartbeat_time = now
         time.sleep(1)
 
 # ============== CHECKING BUY/SELL SIGNALS ==============
 def check_signals():
-    """
-    Periodically checks for signals based on:
-    - Primary direction is bullish
-    - Secondary direction pattern: bullish(-1)->bearish(1)->bullish(-1) ??? 
-      Actually you mentioned "bullish->bearish->bullish" = direction transitions from +1->-1->+1 
-      But let's clarify:
-      Typically, direction=1 means bullish, direction=-1 means bearish in many supertrend scripts. 
-      We'll assume that's the case here.
-    - Volatility = cluster 0 (i.e. High)
-    - Must be within trading time window
-    - If in no position, we buy. If in a position, we might exit. 
-      Adjust logic to your preference.
-    """
-    global in_position, entry_price
-
+    global in_position, position_side, entry_price
     while True:
-        try:
-            if len(close_array) == 0:
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
+        with lock:
+            length = len(close_array)
+            if length == 0:
+                pass
+            else:
+                i = length - 1
+                t = time_array[i]
+                if t < START_TIME or t > END_TIME:
+                    if in_position:
+                        logging.info("Outside trading window. Closing position.")
+                        execute_trade("sell", QTY, SYMBOL_ALPACA)
+                        in_position = False
+                        position_side = None
+                        entry_price = None
+                else:
+                    p_dir = primary_direction[i] if i<len(primary_direction) else None
+                    s_dir = secondary_direction[i] if i<len(secondary_direction) else None
+                    c_idx = cluster_assignments[i] if i<len(cluster_assignments) else None
 
-            idx = len(close_array)-1  # last bar index
-            t = time_array[idx]
+                    if p_dir is not None and s_dir is not None and c_idx is not None and len(last_secondary_directions)>=3:
+                        recent_3 = last_secondary_directions[-3:]
+                        bullish_bearish_bullish = (recent_3 == [1, -1, 1])
+                        bearish_bullish_bearish = (recent_3 == [-1, 1, -1])
 
+                        current_price = close_array[i]
 
-            # We only check signals if the last bar is fully formed:
-            # Pine signals typically trigger on bar close, which is what we do after is_final in on_message_candle.
+                        # LONG ENTRY
+                        if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
+                            sl = low_array[i]
+                            dist = current_price - sl
+                            tp = current_price + (1.5 * dist)
+                            logging.info("Pullback BUY triggered!")
+                            execute_trade(
+                                side="buy",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "long"
+                            entry_price = current_price
 
-            # 1) Confirm we have directions for both signals
-            p_dir = primary_direction[idx]
-            s_dir = secondary_direction[idx]
-            c_idx = cluster_assignments[idx]
+                        # SHORT ENTRY
+                        if (not in_position) and bearish_bullish_bearish and p_dir == -1 and c_idx == 0:
+                            sl = high_array[i]
+                            dist = sl - current_price
+                            tp = current_price - (1.5 * dist)
+                            logging.info("Pullback SHORT triggered!")
+                            execute_trade(
+                                side="sell",
+                                qty=QTY,
+                                symbol=SYMBOL_ALPACA,
+                                stop_loss=round(sl, 2),
+                                take_profit=round(tp, 2)
+                            )
+                            in_position = True
+                            position_side = "short"
+                            entry_price = current_price
 
-            if p_dir is None or s_dir is None or c_idx is None:
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
+                        # EXIT LOGIC
+                        if in_position and position_side == "long" and p_dir == -1:
+                            logging.info("Primary turned bearish. Closing LONG.")
+                            execute_trade("sell", QTY, SYMBOL_ALPACA)
+                            in_position = False
+                            position_side = None
+                            entry_price = None
 
-            # 2) Check pullback pattern in secondary:
-            #    bullish->bearish->bullish means direction= +1-> -1-> +1
-            #    We'll see if last_secondary_directions includes that pattern in the last 3 bars: [1, -1, 1]
-            #    But your Pine code had different logic, so let's replicate your snippet:
-            #    "One with ATR=3 and one with ATR=8. Make decisions on buy/sell with pullback
-            #     when the primary signal is bullish and there is a bullish->bearish->bullish trend in the secondary 
-            #     and cluster=0 (highest)."
-            #    We'll do exactly that:
-            if len(last_secondary_directions) >= 3:
-                recent_3 = last_secondary_directions[-3:]
-                indices = list(range(len(close_array) - 3, len(close_array)))
-
-                # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
-                bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
-
-                # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
-                bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
-
-                # ============ LONG ENTRY ============
-                if (not in_position) and bullish_bearish_bullish and p_dir == 1:  # and c_idx == 0:
-                    # Stop-loss = current bar's low
-                    sl = low_array[i]
-                    # Distance from entry to SL
-                    dist = current_price - sl
-                    # Take-profit = entry + 1.5 * dist
-                    tp = current_price + (1.5 * dist)
-                    logging.info("Pullback BUY triggered!")
-                    execute_trade(
-                        side="buy",
-                        qty=QTY,
-                        symbol=SYMBOL_ALPACA,
-                        stop_loss=round(sl, 2),
-                        take_profit=round(tp, 2)
-                    )
-                    in_position = True
-                    position_side = "long"
-                    entry_price = current_price
-
-                # ============ SHORT ENTRY ============
-                if (not in_position) and bearish_bearish_bearish and p_dir == -1:  # and c_idx == 0:
-                    # Stop-loss = current bar's high
-                    sl = high_array[i]
-                    # Distance from entry to SL
-                    dist = sl - current_price
-                    # Take-profit = entry - 1.5 * dist
-                    tp = current_price - (1.5 * dist)
-                    logging.info("Pullback SHORT triggered!")
-                    execute_trade(
-                        side="sell",
-                        qty=QTY,
-                        symbol=SYMBOL_ALPACA,
-                        stop_loss=round(sl, 2),
-                        take_profit=round(tp, 2)
-                    )
-                    in_position = True
-                    position_side = "short"
-                    entry_price = current_price
-
-
-        except Exception as e:
-            logging.error(f"Error in check_signals loop: {e}", exc_info=True)
+                        if in_position and position_side == "short" and p_dir == 1:
+                            logging.info("Primary turned bullish. Closing SHORT.")
+                            execute_trade("buy", QTY, SYMBOL_ALPACA)
+                            in_position = False
+                            position_side = None
+                            entry_price = None
 
         time.sleep(SIGNAL_CHECK_INTERVAL)
+# ============== REAL-TIME DATA (BINANCE WEBSOCKET) ==============
+def on_message_candle(msg):
+    global hv_new, mv_new, lv_new
+    if 'k' not in msg:
+        return
 
+    k = msg['k']
+    is_final = k['x']
+    close_price = float(k['c'])
+    high_price = float(k['h'])
+    low_price = float(k['l'])
+    open_time = k['t']
+
+    if is_final:
+        with lock:
+            time_array.append(open_time)
+            high_array.append(high_price)
+            low_array.append(low_price)
+            close_array.append(close_price)
+
+            # Trim arrays
+            while len(time_array) > MAX_CANDLES:
+                time_array.pop(0)
+                high_array.pop(0)
+                low_array.pop(0)
+                close_array.pop(0)
+
+            # Compute ATR if enough data
+            if len(close_array) > ATR_LEN:
+                new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
+                atr_array.clear()
+                atr_array.extend(new_atr)
+            else:
+                # Not enough data for ATR
+                atr_array.clear()
+                atr_array.extend([None]*len(close_array))
+
+            while len(atr_array) > len(close_array):
+                atr_array.pop(0)
+
+            # Adjust cluster_assignments
+            while len(cluster_assignments) < len(close_array):
+                cluster_assignments.append(None)
+            while len(cluster_assignments) > len(close_array):
+                cluster_assignments.pop(0)
+
+            def fix_arrays(st, di, ub, lb):
+                needed_len = len(close_array)
+                while len(st) < needed_len:
+                    st.append(None)
+                while len(st) > needed_len:
+                    st.pop(0)
+                while len(di) < needed_len:
+                    di.append(None)
+                while len(di) > needed_len:
+                    di.pop(0)
+                while len(ub) < needed_len:
+                    ub.append(None)
+                while len(ub) > needed_len:
+                    ub.pop(0)
+                while len(lb) < needed_len:
+                    lb.append(None)
+                while len(lb) > needed_len:
+                    lb.pop(0)
+
+            fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+            fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+
+            data_count = len(close_array)
+            if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
+                start_idx = data_count - TRAINING_DATA_PERIOD
+                vol_data = [x for x in atr_array[start_idx:] if x is not None]
+                if len(vol_data) == TRAINING_DATA_PERIOD:
+                    upper_val = max(vol_data)
+                    lower_val = min(vol_data)
+                    hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
+                    mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
+                    lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
+
+                    hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                    hv_new, mv_new, lv_new = hvf, mvf, lvf
+                    logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+
+            i = len(close_array)-1
+            assigned_centroid = None
+            vol = atr_array[i] if i<len(atr_array) else None
+            if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
+                dA = abs(vol - hv_new)
+                dB = abs(vol - mv_new)
+                dC = abs(vol - lv_new)
+                distances = [dA, dB, dC]
+                c_idx = distances.index(min(distances))
+                cluster_assignments[i] = c_idx
+                assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+
+            compute_supertrend(
+                i, PRIMARY_FACTOR, assigned_centroid,
+                primary_supertrend, primary_direction,
+                primary_upperBand, primary_lowerBand
+            )
+            compute_supertrend(
+                i, SECONDARY_FACTOR, assigned_centroid,
+                secondary_supertrend, secondary_direction,
+                secondary_upperBand, secondary_lowerBand
+            )
+
+            if i<len(secondary_direction) and secondary_direction[i] is not None:
+                last_secondary_directions.append(secondary_direction[i])
+                if len(last_secondary_directions) > 30:
+                    last_secondary_directions.pop(0)
+                    
 # ============== WEBSOCKET INIT ==============
 def start_binance_websocket():
     """
