@@ -79,19 +79,25 @@ hv_new = None
 mv_new = None
 lv_new = None
 
-# Two signals
+
+data_lock = threading.Lock()
+
+time_array = []
+high_array = []
+low_array = []
+close_array = []
+atr_array = []
+cluster_assignments = []
 primary_supertrend = []
 primary_direction = []
 primary_upperBand = []
 primary_lowerBand = []
-
 secondary_supertrend = []
 secondary_direction = []
 secondary_upperBand = []
 secondary_lowerBand = []
-
-# Keep track of secondary directions to detect patterns
 last_secondary_directions = []
+
 
 # Position management
 in_position = False    # True if in a trade
@@ -332,92 +338,75 @@ def heartbeat_logging():
 
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
-    """Check for trade signals based on SuperTrend indicators"""
     global in_position, position_side, entry_price, last_processed_candle_time
-
     while True:
         try:
             current_time = pd.Timestamp.now(tz='UTC')
 
-            # Check if there's new data to process
-            if len(time_array) > 0:
-                i = len(close_array) - 1
-                t = pd.to_datetime(time_array[i], unit='ms')
+            with data_lock:  # Acquire lock *only* to read data
+                if len(time_array) > 0:
+                    i = len(close_array) - 1
+                    t = pd.to_datetime(time_array[i], unit='ms', utc=True)
+                    if t > last_processed_candle_time:
+                        last_processed_candle_time = t
+                        logging.info(f"Processing new candle: {t}")
 
-                # Ensure we process each candle only once
-                if t > last_processed_candle_time:
-                    last_processed_candle_time = t
-                    logging.info(f"Processing new candle: {t}")
+                        p_dir = primary_direction[i]
+                        s_dir = secondary_direction[i]
+                        c_idx = cluster_assignments[i]
+                        current_price = close_array[i]
+                        recent_secondary_directions = list(last_secondary_directions) # copy for thread safety
+                   
+            if p_dir is None or s_dir is None or c_idx is None:
+                continue
 
-                    # Gather signals
-                    p_dir = primary_direction[i]
-                    s_dir = secondary_direction[i]
-                    c_idx = cluster_assignments[i]
-                    current_price = close_array[i]
+            if len(recent_secondary_directions) >= 3:
+                recent_3 = recent_secondary_directions[-3:]
+                indices = list(range(len(close_array) - 3, len(close_array)))
 
-                    if p_dir is None or s_dir is None or c_idx is None:
-                        continue  # Skip if any signal is missing
+                bullish_bearish_bullish = (recent_3 == [1, -1, 1]) #and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+                bearish_bearish_bearish = (recent_3 == [-1, 1, -1]) #and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
 
-                    # Check last 3 secondary directions for pullback pattern
-                    if len(last_secondary_directions) >= 3:
-                        recent_3 = last_secondary_directions[-3:]
-                        indices = list(range(len(close_array) - 3, len(close_array)))
+                if bullish_bearish_bullish and p_dir == 1 and not in_position:
+                    logging.info("Long signal triggered!")
+                    qty = 1  # Replace with appropriate quantity calculation
+                    sl = current_price * (1 - STOP_LOSS_PCT)
+                    tp = current_price * (1 + TAKE_PROFIT_PCT)
+                    execute_trade("buy", qty, symbol, sl, tp)
+                    in_position = True
+                    position_side = "long"
+                    entry_price = current_price
 
-                        # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
-                        bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+                elif bearish_bearish_bearish and p_dir == -1 and not in_position:
+                    logging.info("Short signal triggered!")
+                    qty = 1  # Replace with appropriate quantity calculation
+                    sl = current_price * (1 + STOP_LOSS_PCT)
+                    tp = current_price * (1 - TAKE_PROFIT_PCT)
+                    execute_trade("sell", qty, symbol, sl, tp)
+                    in_position = True
+                    position_side = "short"
+                    entry_price = current_price
 
-                        # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
-                        bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
-
-                        # ============ LONG ENTRY ============
-                        if (not in_position) and bullish_bearish_bullish and p_dir == 1:# and c_idx == 0:
-                            # Stop-loss = current bar's low
-                            sl = low_array[i]
-                            # Distance from entry to SL
-                            dist = current_price - sl
-                            # Take-profit = entry + 1.5 * dist
-                            tp = current_price + (1.5 * dist)
-                            logging.info("Pullback BUY triggered!")
-                            execute_trade(
-                                side="buy",
-                                qty=QTY,
-                                symbol=SYMBOL_ALPACA,
-                                stop_loss=round(sl, 2),
-                                take_profit=round(tp, 2)
-                            )
-                            in_position = True
-                            position_side = "long"
-                            entry_price = current_price
-
-                        # ============ SHORT ENTRY ============
-                        if (not in_position) and bearish_bearish_bearish and p_dir == -1:# and c_idx == 0:
-                            # Stop-loss = current bar's high
-                            sl = high_array[i]
-                            # Distance from entry to SL
-                            dist = sl - current_price
-                            # Take-profit = entry - 1.5 * dist
-                            tp = current_price - (1.5 * dist)
-                            logging.info("Pullback SHORT triggered!")
-                            execute_trade(
-                                side="sell",
-                                qty=QTY,
-                                symbol=SYMBOL_ALPACA,
-                                stop_loss=round(sl, 2),
-                                take_profit=round(tp, 2)
-                            )
-                            in_position = True
-                            position_side = "short"
-                            entry_price = current_price
-
-
-                    # Update last_secondary_directions based on current secondary direction
-                    if s_dir is not None:
-                        last_secondary_directions.append(s_dir)
-                        if len(last_secondary_directions) > 35:
-                            last_secondary_directions.pop(0)
+            elif in_position:
+                if position_side == "long" and current_price >= entry_price * (1+TAKE_PROFIT_PCT):
+                    execute_trade("sell", 1, symbol, None, None)
+                    in_position = False
+                    logging.info("Long position take profit")
+                elif position_side == "long" and current_price <= entry_price * (1-STOP_LOSS_PCT):
+                    execute_trade("sell", 1, symbol, None, None)
+                    in_position = False
+                    logging.info("Long position stop loss")
+                elif position_side == "short" and current_price <= entry_price * (1-TAKE_PROFIT_PCT):
+                    execute_trade("buy", 1, symbol, None, None)
+                    in_position = False
+                    logging.info("Short position take profit")
+                elif position_side == "short" and current_price >= entry_price * (1+STOP_LOSS_PCT):
+                    execute_trade("buy", 1, symbol, None, None)
+                    in_position = False
+                    logging.info("Short position stop loss")
 
         except Exception as e:
-            logging.error(f"Error in check_signals loop: {e}", exc_info=True)
+            logging.error(f"Error in check_signals: {e}")
 
         time.sleep(DATA_CHECK_INTERVAL)
 # ============== WEBSOCKET CALLBACK ==============
@@ -435,132 +424,141 @@ def on_message_candle(msg):
     open_time = k['t']
 
     if is_final:
-        candle_time = pd.to_datetime(open_time, unit='ms') # Convert to pandas timestamp
+        candle_time = pd.to_datetime(open_time, unit='ms', utc=True)
 
-        # Check if the candle has already been processed
-        if candle_time <= last_processed_candle_time:
-            return  # Skip processing
+        new_time_array =
+        new_high_array =
+        new_low_array =
+        new_close_array =
 
-        # Append new candle
-        time_array.append(open_time)
-        high_array.append(high_price)
-        low_array.append(low_price)
-        close_array.append(close_price)
+        with data_lock:
+            if not time_array or candle_time > pd.to_datetime(time_array[-1], unit='ms', utc=True):
+                new_time_array = time_array[:]
+                new_high_array = high_array[:]
+                new_low_array = low_array[:]
+                new_close_array = close_array[:]
+                new_time_array.append(open_time)
+                new_high_array.append(high_price)
+                new_low_array.append(low_price)
+                new_close_array.append(close_price)
+                while len(new_time_array) > MAX_CANDLES:
+                    new_time_array.pop(0)
+                    new_high_array.pop(0)
+                    new_low_array.pop(0)
+                    new_close_array.pop(0)
 
-        # Trim to MAX_CANDLES
-        if len(time_array) > MAX_CANDLES:
-            time_array.pop(0)
-            high_array.pop(0)
-            low_array.pop(0)
-            close_array.pop(0)
+        if new_time_array:  # Only calculate and update if we have new data
+            # Now, perform the calculations WITHOUT holding the lock
+            new_atr = compute_atr(new_high_array, new_low_array, new_close_array, ATR_LEN)
+            new_cluster_assignments = cluster_assignments[:]
+            while len(new_cluster_assignments) < len(new_close_array):
+                new_cluster_assignments.append(None)
+            while len(new_cluster_assignments) > len(new_close_array):
+                new_cluster_assignments.pop(0)
 
-        # Recompute ATR
-        new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-        atr_array.clear()
-        atr_array.extend(new_atr)
+            needed_len = len(new_close_array)
+            new_primary_supertrend = primary_supertrend[:]
+            new_primary_direction = primary_direction[:]
+            new_primary_upperBand = primary_upperBand[:]
+            new_primary_lowerBand = primary_lowerBand[:]
+            new_secondary_supertrend = secondary_supertrend[:]
+            new_secondary_direction = secondary_direction[:]
+            new_secondary_upperBand = secondary_upperBand[:]
+            new_secondary_lowerBand = secondary_lowerBand[:]
+            def fix_arrays(st, di, ub, lb, new_st, new_di, new_ub, new_lb):
+                while len(new_st) < needed_len:
+                    new_st.append(None)
+                while len(new_st) > needed_len:
+                    new_st.pop(0)
+                while len(new_di) < needed_len:
+                    new_di.append(None)
+                while len(new_di) > needed_len:
+                    new_di.pop(0)
+                while len(new_ub) < needed_len:
+                    new_ub.append(None)
+                while len(new_ub) > needed_len:
+                    new_ub.pop(0)
+                while len(new_lb) < needed_len:
+                    new_lb.append(None)
+                while len(new_lb) > needed_len:
+                    new_lb.pop(0)
 
-        # Trim atr_array if necessary
-        while len(atr_array) > len(close_array):
-            atr_array.pop(0)
+            fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand,new_primary_supertrend, new_primary_direction, new_primary_upperBand, new_primary_lowerBand)
+            fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand, new_secondary_supertrend, new_secondary_direction, new_secondary_upperBand, new_secondary_lowerBand)
+            data_count = len(new_close_array)
+            if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
+                start_idx = data_count - TRAINING_DATA_PERIOD
+                vol_data = [x for x in new_atr[start_idx:] if x is not None]
+                if len(vol_data) == TRAINING_DATA_PERIOD:
+                    upper_val = max(vol_data)
+                    lower_val = min(vol_data)
+                    hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
+                    mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
+                    lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
 
-        # Adjust cluster_assignments length
-        while len(cluster_assignments) < len(close_array):
-            cluster_assignments.append(None)
-        while len(cluster_assignments) > len(close_array):
-            cluster_assignments.pop(0)
+                    hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                    if hvf and mvf and lvf:
+                        hv_new, mv_new, lv_new = hvf, mvf, lvf
+                        logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+                    else:
+                        logging.warning("K-Means did not finalize due to insufficient data or errors.")
+            i = len(new_close_array)-1
+            assigned_centroid = None
+            if len(new_atr) > i:
+                vol = new_atr[i]
+            else:
+                vol = None
 
-        # Adjust primary/secondary arrays
-        needed_len = len(close_array)
-        def fix_arrays(st, di, ub, lb):
-            while len(st) < needed_len:
-                st.append(None)
-            while len(st) > needed_len:
-                st.pop(0)
-            while len(di) < needed_len:
-                di.append(None)
-            while len(di) > needed_len:
-                di.pop(0)
-            while len(ub) < needed_len:
-                ub.append(None)
-            while len(ub) > needed_len:
-                ub.pop(0)
-            while len(lb) < needed_len:
-                lb.append(None)
-            while len(lb) > needed_len:
-                lb.pop(0)
+            if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
+                dA = abs(vol - hv_new)
+                dB = abs(vol - mv_new)
+                dC = abs(vol - lv_new)
+                distances = [dA, dB, dC]
+                c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
+                assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
 
-        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
-        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
-
-        # Possibly run K-Means
-        data_count = len(close_array)
-        if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
-            start_idx = data_count - TRAINING_DATA_PERIOD
-            vol_data = [x for x in atr_array[start_idx:] if x is not None]
-            if len(vol_data) == TRAINING_DATA_PERIOD:
-                upper_val = max(vol_data)
-                lower_val = min(vol_data)
-                hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
-                mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
-                lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
-
-                hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
-                if hvf and mvf and lvf:
-                    hv_new, mv_new, lv_new = hvf, mvf, lvf
-                    logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
-                else:
-                    logging.warning("K-Means did not finalize due to insufficient data or errors.")
-
-        # Assign cluster & compute supertrend for this bar
-        i = len(close_array)-1
-        assigned_centroid = None
-        vol = atr_array[i]
-
-        if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
-            dA = abs(vol - hv_new)
-            dB = abs(vol - mv_new)
-            dC = abs(vol - lv_new)
-            distances = [dA, dB, dC]
-            c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
-            cluster_assignments[i] = c_idx
-            assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-        else:
-            logging.warning("Assigned centroid is None. Skipping SuperTrend computation for this bar.")
-
-        if assigned_centroid is not None:
-            compute_supertrend(
-                i, PRIMARY_FACTOR, assigned_centroid,
-                primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand
-            )
-            compute_supertrend(
-                i, SECONDARY_FACTOR, assigned_centroid,
-                secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
-            )
-        else:
-            # Assign default SuperTrend values if centroid is None
-            compute_supertrend(
-                i, PRIMARY_FACTOR, None,
-                primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand
-            )
-            compute_supertrend(
-                i, SECONDARY_FACTOR, None,
-                secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
-            )
-
-        # Update last_secondary_directions
-        if secondary_direction[i] is not None:
-            last_secondary_directions.append(secondary_direction[i])
-            if len(last_secondary_directions) > 35:
-                last_secondary_directions.pop(0)
-
-        # Update the last processed candle time
-        last_processed_candle_time = candle_time
-
-
+            if assigned_centroid is not None:
+                compute_supertrend(
+                    i, PRIMARY_FACTOR, assigned_centroid,
+                    new_primary_supertrend, new_primary_direction,
+                    new_primary_upperBand, new_primary_lowerBand
+                )
+                compute_supertrend(
+                    i, SECONDARY_FACTOR, assigned_centroid,
+                    new_secondary_supertrend, new_secondary_direction,
+                    new_secondary_upperBand, new_secondary_lowerBand
+                )
+            else:
+                # Assign default SuperTrend values if centroid is None
+                compute_supertrend(
+                    i, PRIMARY_FACTOR, None,
+                    new_primary_supertrend, new_primary_direction,
+                    new_primary_upperBand, new_primary_lowerBand
+                )
+                compute_supertrend(
+                    i, SECONDARY_FACTOR, None,
+                    new_secondary_supertrend, new_secondary_direction,
+                    new_secondary_upperBand, new_secondary_lowerBand
+                )
+            with data_lock:
+                time_array = new_time_array
+                high_array = new_high_array
+                close_array = new_close_array
+                atr_array = new_atr
+                cluster_assignments = new_cluster_assignments
+                primary_supertrend = new_primary_supertrend
+                primary_direction = new_primary_direction
+                primary_upperBand = new_primary_upperBand
+                primary_lowerBand = new_primary_lowerBand
+                secondary_supertrend = new_secondary_supertrend
+                secondary_direction = new_secondary_direction
+                secondary_upperBand = new_secondary_upperBand
+                secondary_lowerBand = new_secondary_lowerBand
+                if new_secondary_direction[i] is not None:
+                    last_secondary_directions.append(new_secondary_direction[i])
+                    while len(last_secondary_directions) > 35:
+                        last_secondary_directions.pop(0)
+                last_processed_candle_time = candle_time
 
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
