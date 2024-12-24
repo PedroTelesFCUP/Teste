@@ -50,6 +50,9 @@ HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
+# Heartbeat logging interval
+HEARTBEAT_INTERVAL = 30
+
 
 # Trading signals refresh intervals
 SIGNAL_CHECK_INTERVAL = 1.0  # seconds
