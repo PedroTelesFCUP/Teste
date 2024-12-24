@@ -413,19 +413,7 @@ def on_message_candle(msg):
                 last_secondary_directions.pop(0)
 
 
-def start_binance_websocket():
-    """
-    Starts Binance WebSocket to stream kline data for BINANCE_SYMBOL on BINANCE_INTERVAL.
-    """
-    logging.info("Starting Binance WebSocket...")
-    twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
-    twm.start()
-    twm.start_kline_socket(
-        callback=on_message_candle,
-        symbol=BINANCE_SYMBOL.lower(),
-        interval=BINANCE_INTERVAL
-    )
-    twm.join()  # Keep the socket open
+
 
 # ============== TRADING LOGIC ==============
 def execute_trade(side, qty, symbol):
@@ -571,6 +559,36 @@ def check_signals():
 
         time.sleep(SIGNAL_CHECK_INTERVAL)
 
+# ============== WEBSOCKET INIT ==============
+def start_binance_websocket():
+    """
+    Start Binance WebSocket without manual ping/pong.
+    If an error occurs, wait 30 seconds and retry.
+    """
+    while True:
+        try:
+            logging.info("Starting Binance WebSocket (background worker).")
+            twm = ThreadedWebsocketManager(
+                api_key=BINANCE_API_KEY,
+                api_secret=BINANCE_SECRET_KEY
+            )
+            twm.start()
+
+            # Start the kline socket for the specified symbol/interval
+            logging.info(f"Subscribing to {BINANCE_SYMBOL} {BINANCE_INTERVAL} kline stream.")
+            twm.start_kline_socket(
+                callback=on_message_candle,
+                symbol=BINANCE_SYMBOL.lower(),
+                interval=BINANCE_INTERVAL
+            )
+
+            # Block here and keep the WebSocket alive
+            logging.info("WebSocket is now running. Waiting for data...")
+            twm.join()  # twm.join() will block until error or shutdown
+
+        except Exception as e:
+            logging.error(f"WebSocket error: {e}. Reconnecting in 30 seconds...")
+            time.sleep(30)  # Wait before reconnecting
 # ============== MAIN ==============
 if __name__ == "__main__":
     logging.info("Starting the dual SuperTrend strategy with K-Means clustering...")
@@ -580,7 +598,11 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
     logging.info("Flask monitoring started on port 8080.")
-    
+
+    # Start heartbeat thread
+    hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
+    hb_thread.start()
+
     # Start a thread for signals checking
     signal_thread = threading.Thread(target=check_signals, daemon=True)
     signal_thread.start()
