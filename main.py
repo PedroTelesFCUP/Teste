@@ -286,63 +286,73 @@ def compute_supertrend(
 
 # ============== REAL-TIME DATA (BINANCE WEBSOCKET) ==============
 def on_message_candle(msg):
-    """
-    WebSocket callback: processes incoming kline data from Binance.
-    """
+    global hv_new, mv_new, lv_new  # Declare globals at the start of the function
+
     if 'k' not in msg:
         return
+
     k = msg['k']
-    is_final = k['x']  # True if this is the final update for the candle
+    is_final = k['x']
     close_price = float(k['c'])
     high_price = float(k['h'])
     low_price = float(k['l'])
-    open_time = k['t']  # in ms
+    open_time = k['t']
 
-    # We handle the new data
-    # If it's a new candle (is_final==True), we finalize that candle's data
-    # We do a bar-by-bar approach exactly as Pine does: once the candle closes, we push it in arrays.
     if is_final:
+        # Append new candle
         time_array.append(open_time)
         high_array.append(high_price)
         low_array.append(low_price)
         close_array.append(close_price)
 
-        # Maintain fixed length if you wish (for memory), but typically you keep a large buffer.
+        # Trim to MAX_CANDLES
+        if len(time_array) > MAX_CANDLES:
+            time_array.pop(0)
+            high_array.pop(0)
+            low_array.pop(0)
+            close_array.pop(0)
 
-        # Recompute ATR if needed
-        # But we only need to recompute for the new bar, not all bars. 
-        # For simplicity, recalc from scratch or from the last known value.
-        # We'll do from scratch here for clarity:
+        # Recompute ATR
         new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-        # Update global atr_array
-        while len(atr_array) < len(new_atr):
-            atr_array.append(None)
-        for i in range(len(new_atr)):
-            atr_array[i] = new_atr[i]
+        atr_array.clear()
+        atr_array.extend(new_atr)
 
-        # Expand cluster_assignments if needed
+        # Trim atr_array if necessary
+        while len(atr_array) > len(close_array):
+            atr_array.pop(0)
+
+        # Adjust cluster_assignments length
         while len(cluster_assignments) < len(close_array):
             cluster_assignments.append(None)
+        while len(cluster_assignments) > len(close_array):
+            cluster_assignments.pop(0)
 
-        # Expand arrays for primary & secondary supertrend
-        # Make sure each has the same length
-        while len(primary_supertrend) < len(close_array):
-            primary_supertrend.append(None)
-            primary_direction.append(None)
-            primary_upperBand.append(None)
-            primary_lowerBand.append(None)
+        # Adjust primary/secondary arrays
+        needed_len = len(close_array)
+        def fix_arrays(st, di, ub, lb):
+            while len(st) < needed_len:
+                st.append(None)
+            while len(st) > needed_len:
+                st.pop(0)
+            while len(di) < needed_len:
+                di.append(None)
+            while len(di) > needed_len:
+                di.pop(0)
+            while len(ub) < needed_len:
+                ub.append(None)
+            while len(ub) > needed_len:
+                ub.pop(0)
+            while len(lb) < needed_len:
+                lb.append(None)
+            while len(lb) > needed_len:
+                lb.pop(0)
 
-        while len(secondary_supertrend) < len(close_array):
-            secondary_supertrend.append(None)
-            secondary_direction.append(None)
-            secondary_upperBand.append(None)
-            secondary_lowerBand.append(None)
+        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
 
-        # Once we have at least TRAINING_DATA_PERIOD bars, we can run K-Means if needed
-        # or skip if we've done it once already and CLUSTER_RUN_ONCE is True.
+        # Possibly run K-Means
         data_count = len(close_array)
         if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
-            # Prepare the training data from the last TRAINING_DATA_PERIOD bars
             start_idx = data_count - TRAINING_DATA_PERIOD
             vol_data = [x for x in atr_array[start_idx:] if x is not None]
             if len(vol_data) == TRAINING_DATA_PERIOD:
@@ -352,64 +362,41 @@ def on_message_candle(msg):
                 mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
                 lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
 
-                # Run K-means
-                global hv_new, mv_new, lv_new
-                ah, am, al, sa, sb, sc = run_kmeans(vol_data, hv_init, mv_init, lv_init)
-                hv_new, mv_new, lv_new = ah, am, al
-                logging.info(f"K-Means Clustering Finalized: hv_new={hv_new:.4f}, mv_new={mv_new:.4f}, lv_new={lv_new:.4f}")
-        
-        # Now we do the cluster assignment & supertrend for the latest bar:
-        # i = len(close_array)-1 (the last bar index)
+                hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                hv_new, mv_new, lv_new = hvf, mvf, lvf
+                logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+
+        # Assign cluster & compute supertrend for this bar
         i = len(close_array)-1
+        assigned_centroid = None
         vol = atr_array[i]
-        # Assign cluster if we have hv_new, etc.
+
         if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
             dA = abs(vol - hv_new)
             dB = abs(vol - mv_new)
             dC = abs(vol - lv_new)
             distances = [dA, dB, dC]
-            c_idx = distances.index(min(distances))  # 0=High,1=Medium,2=Low
+            c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
             cluster_assignments[i] = c_idx
+            assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
 
-        # Then compute the primary & secondary supertrend for candle i:
-        assigned_centroid = None
-        if cluster_assignments[i] is not None:
-            c_idx = cluster_assignments[i]
-            if c_idx == 0:    # High
-                assigned_centroid = hv_new
-            elif c_idx == 1:  # Medium
-                assigned_centroid = mv_new
-            else:             # Low
-                assigned_centroid = lv_new
-
-        # 1) Primary
         compute_supertrend(
-            i=i,
-            factor=PRIMARY_FACTOR,
-            assigned_atr=assigned_centroid,
-            st_array=primary_supertrend,
-            dir_array=primary_direction,
-            ub_array=primary_upperBand,
-            lb_array=primary_lowerBand
+            i, PRIMARY_FACTOR, assigned_centroid,
+            primary_supertrend, primary_direction,
+            primary_upperBand, primary_lowerBand
+        )
+        compute_supertrend(
+            i, SECONDARY_FACTOR, assigned_centroid,
+            secondary_supertrend, secondary_direction,
+            secondary_upperBand, secondary_lowerBand
         )
 
-        # 2) Secondary
-        compute_supertrend(
-            i=i,
-            factor=SECONDARY_FACTOR,
-            assigned_atr=assigned_centroid,
-            st_array=secondary_supertrend,
-            dir_array=secondary_direction,
-            ub_array=secondary_upperBand,
-            lb_array=secondary_lowerBand
-        )
-
-        # Keep track of last few secondary directions for pattern detection
+        # Update last_secondary_directions
         if secondary_direction[i] is not None:
             last_secondary_directions.append(secondary_direction[i])
-            # Limit length
             if len(last_secondary_directions) > 30:
                 last_secondary_directions.pop(0)
+
 
 def start_binance_websocket():
     """
