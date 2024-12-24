@@ -216,14 +216,15 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
 
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
     """
-    Replicates the incremental Pine supertrend logic.
+    Replicates the incremental Pine Script SuperTrend logic.
     """
     if assigned_atr is None:
-        # No volatility => carry forward
-        st_array[i] = st_array[i-1] if i>0 else None
-        dir_array[i] = dir_array[i-1] if i>0 else 1
-        ub_array[i] = ub_array[i-1] if i>0 else None
-        lb_array[i] = lb_array[i-1] if i>0 else None
+        # No volatility => carry forward previous values
+        st_array[i] = st_array[i-1] if i > 0 else None
+        dir_array[i] = dir_array[i-1] if i > 0 else 1
+        ub_array[i] = ub_array[i-1] if i > 0 else None
+        lb_array[i] = lb_array[i-1] if i > 0 else None
+        logging.warning(f"Skipping computation for candle {i} due to missing ATR.")
         return
 
     hl2 = (high_array[i] + low_array[i]) / 2.0
@@ -231,43 +232,37 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     downBand = hl2 - factor * assigned_atr
 
     if i == 0:
+        # Initialize for the first bar
         dir_array[i] = 1
         ub_array[i] = upBand
         lb_array[i] = downBand
         st_array[i] = upBand
+        logging.info(f"Initialized SuperTrend for first candle: upBand={upBand}, downBand={downBand}")
         return
 
-    prevDir = dir_array[i-1] if dir_array[i-1] is not None else 1 # Handle None values for prevDir
+    prevST = st_array[i-1] if st_array[i-1] is not None else downBand
     prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
     # Band continuity
-    if (downBand > prevLB or close_array[i-1]<prevLB):
-        downBand = downBand
+    downBand = max(downBand, prevLB) if close_array[i-1] < prevLB else downBand
+    upBand = min(upBand, prevUB) if close_array[i-1] > prevUB else upBand
+
+    # Direction logic (aligned with Pine Script)
+    if prevST == prevUB:
+        dir_array[i] = -1 if close_array[i] > upBand else 1
     else:
-        downBand = prevLB
+        dir_array[i] = 1 if close_array[i] < downBand else -1
 
-    if (upBand < prevUB or close_array[i-1]>prevUB):
-        upBand = upBand
-    else:
-        upBand = prevUB
-
-    # *** Corrected Logic for Direction Calculation ***
-    if prevDir == 1:  # If the previous direction was up
-        if close_array[i] < downBand:
-            dir_array[i] = -1  # Current direction is down
-        else:
-            dir_array[i] = 1  # Current direction is still up
-    else:  # If the previous direction was down
-        if close_array[i] > upBand:
-            dir_array[i] = 1  # Current direction is up
-        else:
-            dir_array[i] = -1  # Current direction is still down
-
-    st_array[i] = upBand if dir_array[i] == -1 else downBand
+    # Update SuperTrend
+    st_array[i] = downBand if dir_array[i] == 1 else upBand
     ub_array[i] = upBand
     lb_array[i] = downBand
-    logging.info(f"    Candle {i}: upBand={upBand:.2f}, downBand={downBand:.2f}, prevUB={prevUB:.2f}, prevLB={prevLB:.2f}, dir={dir_array[i]:.2f}, ST={st_array[i]:.2f}")
+
+    logging.info(
+        f"Candle {i}: upBand={upBand:.2f}, downBand={downBand:.2f}, prevUB={prevUB:.2f}, prevLB={prevLB:.2f}, "
+        f"dir={dir_array[i]}, ST={st_array[i]:.2f}"
+    )
 
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
