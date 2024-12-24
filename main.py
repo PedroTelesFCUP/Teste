@@ -424,20 +424,39 @@ def on_message_candle(msg):
         candle_time = pd.to_datetime(open_time, unit='ms', utc=True)
 
         with data_lock:
-            if not time_array or candle_time > pd.to_datetime(time_array[-1], unit='ms', utc=True):
-                new_time_array = time_array[:]
-                new_high_array = high_array[:]
-                new_low_array = low_array[:]
-                new_close_array = close_array[:]
-                new_time_array.append(open_time)
-                new_high_array.append(high_price)
-                new_low_array.append(low_price)
-                new_close_array.append(close_price)
-                while len(new_time_array) > MAX_CANDLES:
-                    new_time_array.pop(0)
-                    new_high_array.pop(0)
-                    new_low_array.pop(0)
-                    new_close_array.pop(0)
+            # Initialize arrays if they're empty:
+            if not time_array:
+                time_array = []
+                high_array = []
+                low_array = []
+                close_array = []
+                atr_array = []
+                cluster_assignments = []
+                primary_supertrend = []
+                primary_direction = []
+                primary_upperBand = []
+                primary_lowerBand = []
+                secondary_supertrend = []
+                secondary_direction = []
+                secondary_upperBand = []
+                secondary_lowerBand = []
+                last_secondary_directions = []
+                logging.info("Arrays were not initialized. Initializing.")
+
+            # Append new data ONLY if it's a new candle:
+            if candle_time > pd.to_datetime(time_array[-1], unit='ms', utc=True) if time_array else True:
+                time_array.append(open_time)
+                high_array.append(high_price)
+                low_array.append(low_price)
+                close_array.append(close_price)
+
+                while len(time_array) > MAX_CANDLES:
+                    time_array.pop(0)
+                    high_array.pop(0)
+                    low_array.pop(0)
+                    close_array.pop(0)
+                last_processed_candle_time = candle_time
+
 
         if new_time_array:  # Only calculate and update if we have new data
             # Now, perform the calculations WITHOUT holding the lock
