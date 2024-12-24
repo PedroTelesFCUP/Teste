@@ -420,11 +420,6 @@ def on_message_candle(msg):
     if is_final:
         candle_time = pd.to_datetime(open_time, unit='ms', utc=True)
 
-        new_time_array =
-        new_high_array =
-        new_low_array =
-        new_close_array =
-
         with data_lock:
             if not time_array or candle_time > pd.to_datetime(time_array[-1], unit='ms', utc=True):
                 new_time_array = time_array[:]
