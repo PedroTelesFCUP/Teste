@@ -34,12 +34,12 @@ QTY = 0.001               # Example size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "1m"  # Candle interval: 1m, 5m, 15m, etc.
+BINANCE_INTERVAL = "30s"  # Candle interval: 1m, 5m, 15m, etc.
 
 # Strategy / logic parameters
 ATR_LEN = 10
-PRIMARY_FACTOR = 3.0      # SuperTrend factor for primary signal
-SECONDARY_FACTOR = 8.0    # SuperTrend factor for secondary signal
+PRIMARY_FACTOR = 8.0      # SuperTrend factor for primary signal
+SECONDARY_FACTOR = 3.0    # SuperTrend factor for secondary signal
 TRAINING_DATA_PERIOD = 100
 MAX_CANDLES = 150
 MAX_PULLBACK_CANDLES = 30
@@ -427,6 +427,30 @@ def execute_trade(side, qty, symbol):
     except Exception as e:
         logging.error(f"Alpaca order failed: {e}", exc_info=True)
 
+# ============== LOGGING ==============
+def heartbeat_logging():
+    global last_heartbeat_time
+    while True:
+        now = time.time()
+        if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+            if len(close_array) > 0:
+                i = len(close_array)-1
+                msg = "\n=== Heartbeat ===\n"
+                msg += f"Last Price: {close_array[i]:.2f}\n"
+                msg += f"Primary Dir: {primary_direction[i]}\n"
+                msg += f"Secondary Dir: {secondary_direction[i]}\n"
+                msg += f"Cluster: {cluster_assignments[i]} (0=High,1=Med,2=Low)\n"
+                msg += f"ATR: {atr_array[i] if atr_array[i] else 'N/A'}\n"
+                msg += f"PriST: {primary_supertrend[i] if primary_supertrend[i] else 'N/A'}\n"
+                msg += f"SecST: {secondary_supertrend[i] if secondary_supertrend[i] else 'N/A'}\n"
+                msg += f"In Position: {in_position} ({position_side})\n"
+                msg += f"Entry Price: {entry_price}\n"
+                msg +=   "=============="
+                logging.info(msg)
+            last_heartbeat_time = now
+        time.sleep(1)
+
+# ============== CHECKING BUY/SELL SIGNALS ==============
 def check_signals():
     """
     Periodically checks for signals based on:
@@ -451,15 +475,7 @@ def check_signals():
 
             idx = len(close_array)-1  # last bar index
             t = time_array[idx]
-            if t < START_TIME or t > END_TIME:
-                # Outside trading window, flatten any position
-                if in_position:
-                    logging.info("Outside trading window. Closing position.")
-                    execute_trade("sell", QTY, SYMBOL_ALPACA)
-                    in_position = False
-                    entry_price = None
-                time.sleep(SIGNAL_CHECK_INTERVAL)
-                continue
+
 
             # We only check signals if the last bar is fully formed:
             # Pine signals typically trigger on bar close, which is what we do after is_final in on_message_candle.
