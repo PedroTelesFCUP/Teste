@@ -44,7 +44,7 @@ BINANCE_INTERVAL = "1s"  # 1-minute bars
 ATR_LEN = 20
 PRIMARY_FACTOR = 8     # SuperTrend factor for primary
 SECONDARY_FACTOR = 3     # SuperTrend factor for secondary
-TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
+TRAINING_DATA_PERIOD = 10  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
@@ -243,13 +243,16 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     prevDir = dir_array[i-1]
     prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
-
+    logging.info(f"i: {i}, prevDir: {prevDir}, close_array[i]: {close_array[i]}, upBand: {upBand}, downBand: {downBand}")
+    logging.info(f"Before Band Continuity: upBand: {upBand}, downBand: {downBand}, prevUB: {prevUB}, prevLB: {prevLB}, close_array[i-1]: {close_array[i-1]}")
     # Band continuity
     if (downBand > prevLB or close_array[i-1]<prevLB):
         downBand = downBand
     else:
         downBand = prevLB
-
+        
+    logging.info(f"After Band Continuity: upBand: {upBand}, downBand: {downBand}")
+    
     if (upBand < prevUB or close_array[i-1]>prevUB):
         upBand = upBand
     else:
@@ -269,7 +272,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
             dir_array[i] = 1
         else:
             dir_array[i] = -1
-
+    logging.info(f"New dir_array[i]: {dir_array[i]}")
     st_array[i] = downBand if dir_array[i] == -1 else upBand
     ub_array[i] = upBand
     lb_array[i] = downBand
