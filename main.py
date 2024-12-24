@@ -408,7 +408,7 @@ def check_signals():
         time.sleep(DATA_CHECK_INTERVAL)
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
-    global hv_new, mv_new, lv_new, last_processed_candle_time  # Declare globals at the start of the function
+    global hv_new, mv_new, lv_new, last_processed_candle_time
 
     if 'k' not in msg:
         return
