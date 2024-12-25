@@ -309,85 +309,34 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
 
 # ============== LOGGING (HEARTBEAT) ==============
 def heartbeat_logging():
-    global last_heartbeat_time, size_a, size_b, size_c
+    global last_heartbeat_time
     while True:
         now = time.time()
         if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
             if len(close_array) > 0:
-                i = len(close_array) - 1
-                
-                # Retrieve Current Values
+                i = len(close_array)-1
                 p_dir = primary_direction[i] if i < len(primary_direction) else 'N/A'
                 s_dir = secondary_direction[i] if i < len(secondary_direction) else 'N/A'
                 c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
                 atr = atr_array[i] if i < len(atr_array) else 'N/A'
                 pri_st = primary_supertrend[i] if i < len(primary_supertrend) else 'N/A'
                 sec_st = secondary_supertrend[i] if i < len(secondary_supertrend) else 'N/A'
-                
-                # Cluster Information
+
                 cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
-                cluster_sizes_str = f"Cluster Sizes - High: {size_a}, Medium: {size_b}, Low: {size_c}\n"
-                
-                # Bands Information
-                if i < len(primary_upperBand) and i < len(primary_lowerBand):
-                    primary_bands = f"Primary Upper Band: {primary_upperBand[i]:.2f}, Primary Lower Band: {primary_lowerBand[i]:.2f}\n"
-                else:
-                    primary_bands = "Primary Bands: N/A\n"
-                
-                if i < len(secondary_upperBand) and i < len(secondary_lowerBand):
-                    secondary_bands = f"Secondary Upper Band: {secondary_upperBand[i]:.2f}, Secondary Lower Band: {secondary_lowerBand[i]:.2f}\n"
-                else:
-                    secondary_bands = "Secondary Bands: N/A\n"
-                
-                # Last Three Directions of SuperTrend
-                # For Primary SuperTrend
-                if len(primary_direction) >= 3:
-                    last_three_primary_dirs = primary_direction[-3:]
-                    last_three_primary_dirs_str = ', '.join([str(dir) for dir in last_three_primary_dirs])
-                elif len(primary_direction) > 0:
-                    last_three_primary_dirs_str = ', '.join([str(dir) for dir in primary_direction])
-                else:
-                    last_three_primary_dirs_str = 'N/A'
-                
-                # For Secondary SuperTrend
-                if len(secondary_direction) >= 3:
-                    last_three_secondary_dirs = secondary_direction[-3:]
-                    last_three_secondary_dirs_str = ', '.join([str(dir) for dir in last_three_secondary_dirs])
-                elif len(secondary_direction) > 0:
-                    last_three_secondary_dirs_str = ', '.join([str(dir) for dir in secondary_direction])
-                else:
-                    last_three_secondary_dirs_str = 'N/A'
-                
-                last_three_dirs_str = (
-                    f"Last 3 Primary Directions: {last_three_primary_dirs_str}\n"
-                    f"Last 3 Secondary Directions: {last_three_secondary_dirs_str}\n"
-                )
-                
-                # Construct the Heartbeat Message
                 msg = "\n=== Heartbeat ===\n"
                 msg += f"Last Price: {close_array[i]:.2f}\n"
                 msg += f"Primary Dir: {p_dir}\n"
                 msg += f"Secondary Dir: {s_dir}\n"
                 msg += f"Cluster: {cluster_str}\n"
-                msg += cluster_sizes_str
-                msg += primary_bands
-                msg += secondary_bands
                 msg += f"ATR: {atr}\n"
                 msg += f"PriST: {pri_st}\n"
                 msg += f"SecST: {sec_st}\n"
-                msg += last_three_dirs_str
                 msg += f"In Position: {in_position} ({position_side})\n"
                 msg += f"Entry Price: {entry_price}\n"
                 msg += "=============="
-                
-                # Log the Heartbeat Message
                 logging.info(msg)
-            
-            # Update the Last Heartbeat Time
             last_heartbeat_time = now
-        # Sleep for 1 second before the next check
         time.sleep(1)
-
 
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
