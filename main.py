@@ -216,6 +216,7 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         logging.error(f"K-Means clustering failed: {e}", exc_info=True)
         return None, None, None, 0, 0, 0
 
+# ============== CALCULATE SUPERTREND ==============
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
     if assigned_atr is None:
         # Carry forward previous values
@@ -229,61 +230,51 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     upBand = hl2 + factor * assigned_atr
     downBand = hl2 - factor * assigned_atr
 
-    if i == 0:
-        dir_array[i] = 1
-        ub_array[i] = upBand
-        lb_array[i] = downBand
-        st_array[i] = upBand
-        logging.debug(f"Initial supertrend at index {i}: dir=1, st={upBand}, ub={upBand}, lb={downBand}")
-        return
-
-    prevDir = dir_array[i-1]
+    # Previous bands
     prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-    # Corrected Band Continuity
-    if (downBand > prevLB) or (close_array[i-1] < prevLB):
-        adjusted_downBand = downBand
-    else:
-        adjusted_downBand = prevLB
+    # Adjust bands for continuity with original conditions
+    adjusted_downBand = downBand if (downBand > prevLB or close_array[i-1] < prevLB) else prevLB
+    adjusted_upBand = upBand if (upBand < prevUB or close_array[i-1] > prevUB) else prevUB
 
-    if (upBand < prevUB) or (close_array[i-1] > prevUB):
-        adjusted_upBand = upBand
-    else:
-        adjusted_upBand = prevUB
+    prevst = st_array[i-1] if i > 0 else None  # Previous SuperTrend for fallback
+    adjustedst = None 
 
-    logging.debug(f"Index {i}: Adjusted upBand={adjusted_upBand:.2f}, Adjusted downBand={adjusted_downBand:.2f}")
-
-    # Direction determination
-    if prevDir == 1:
+    # Determine direction and update SuperTrend
+    if dir_array[i-1] == 1:  # Previously in uptrend
         if close_array[i] < adjusted_downBand:
-            newDir = -1  # Switch to Downtrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} < downBand {adjusted_downBand:.2f} ⇒ Switch to Downtrend (-1)")
+            newDir = -1  # Switch to downtrend
+            adjustedst = adjusted_upBand  # SuperTrend switches to upper band
         else:
-            newDir = 1   # Remain Uptrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} >= downBand {adjusted_downBand:.2f} ⇒ Remain Uptrend (1)")
-    elif prevDir == -1:
+            newDir = 1  # Remain in uptrend
+            adjustedst = adjusted_downBand  # SuperTrend remains lower band
+    elif dir_array[i-1] == -1:  # Previously in downtrend
         if close_array[i] > adjusted_upBand:
-            newDir = 1   # Switch to Uptrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} > upBand {adjusted_upBand:.2f} ⇒ Switch to Uptrend (1)")
+            newDir = 1  # Switch to uptrend
+            adjustedst = adjusted_downBand  # SuperTrend switches to lower band
         else:
-            newDir = -1  # Remain Downtrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} <= upBand {adjusted_upBand:.2f} ⇒ Remain Downtrend (-1)")
+            newDir = -1  # Remain in downtrend
+            adjustedst = adjusted_upBand  # SuperTrend remains upper band
     else:
-        # Handle unexpected direction values
-        newDir = prevDir
-        logging.warning(f"Index {i}: Unexpected prevDir={prevDir}. Maintaining current direction.")
+        # Handle unexpected direction values (fallback)
+        newDir = dir_array[i-1] if i > 0 else 1
+        adjustedst = prevst  # Keep SuperTrend unchanged if direction is unexpected
 
-    # Assign new direction and SuperTrend
+    # Assign direction
     dir_array[i] = newDir
-    st_array[i] = upBand if newDir == -1 else downBand
-    ub_array[i] = adjusted_upBand  # Use adjusted bands
+
+    # Assign bands
+    ub_array[i] = adjusted_upBand
     lb_array[i] = adjusted_downBand
 
+    # Assign SuperTrend
+    st_array[i] = adjustedst
+
     # Detect and log direction shift
-    if i > 0 and newDir != prevDir:
-        trend = "Uptrend" if newDir == 1 else "Downtrend"
-        prev_trend = "Uptrend" if prevDir == 1 else "Downtrend"
+    if i > 0 and dir_array[i] != dir_array[i-1]:
+        trend = "Uptrend" if dir_array[i] == 1 else "Downtrend"
+        prev_trend = "Uptrend" if dir_array[i-1] == 1 else "Downtrend"
         logging.info(
             f"Direction Shift Detected at index {i}: {prev_trend} -> {trend} | "
             f"Close: {close_array[i]:.2f} | ST: {st_array[i]:.2f} | "
