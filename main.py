@@ -48,6 +48,10 @@ TRAINING_DATA_PERIOD = 100  # Increased from 1 to 3
 HIGHVOL_PERCENTILE = 0.75
 MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
+# Dynamic Clustering Parameters
+DYNAMIC_CLUSTERING = True          # Enable or disable dynamic clustering
+RECLUSTER_INTERVAL = 50            # Number of candles between re-clustering
+RECLUSTERING_ENABLED = True        # Toggle for enabling re-clustering
 
 # Heartbeat intervals
 HEARTBEAT_INTERVAL = 31   # seconds
@@ -73,6 +77,8 @@ low_array = []
 close_array = []
 atr_array = []
 cluster_assignments = []
+
+
 
 # K-Means centroids for High/Medium/Low once stable
 hv_new = None
@@ -100,6 +106,9 @@ entry_price = None
 
 # For logging
 last_heartbeat_time = 0
+
+# Clustering Counters
+recluster_counter = 0
 
 # Flask Server
 app = Flask(__name__)
@@ -173,7 +182,7 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         def means_stable(m):
             if len(m) < 2:
                 return False
-            return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
+            return math.isclose(m[-1], m[-2], rel_tol=1e-3, abs_tol=1e-3)
 
         while True:
             hv_cluster = []
@@ -425,7 +434,7 @@ def check_signals():
 
 # ============== WEBSOCKET CALLBACK ==============
 def on_message_candle(msg):
-    global hv_new, mv_new, lv_new  # Declare globals at the start of the function
+    global hv_new, mv_new, lv_new, recluster_counter
 
     if 'k' not in msg:
         return
@@ -438,121 +447,127 @@ def on_message_candle(msg):
     open_time = k['t']
 
     if is_final:
-        # Append new candle
-        time_array.append(open_time)
-        high_array.append(high_price)
-        low_array.append(low_price)
-        close_array.append(close_price)
+            # Append new candle
+            time_array.append(open_time)
+            high_array.append(high_price)
+            low_array.append(low_price)
+            close_array.append(close_price)
 
-        # Trim to MAX_CANDLES
-        if len(time_array) > MAX_CANDLES:
-            time_array.pop(0)
-            high_array.pop(0)
-            low_array.pop(0)
-            close_array.pop(0)
+            # Trim to MAX_CANDLES
+            if len(time_array) > MAX_CANDLES:
+                time_array.pop(0)
+                high_array.pop(0)
+                low_array.pop(0)
+                close_array.pop(0)
 
-        # Recompute ATR
-        new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
-        atr_array.clear()
-        atr_array.extend(new_atr)
+            # Recompute ATR
+            new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
+            atr_array.clear()
+            atr_array.extend(new_atr)
 
-        # Trim atr_array if necessary
-        while len(atr_array) > len(close_array):
-            atr_array.pop(0)
+            # Trim atr_array if necessary
+            while len(atr_array) > len(close_array):
+                atr_array.pop(0)
 
-        # Adjust cluster_assignments length
-        while len(cluster_assignments) < len(close_array):
-            cluster_assignments.append(None)
-        while len(cluster_assignments) > len(close_array):
-            cluster_assignments.pop(0)
+            # Adjust cluster_assignments length
+            while len(cluster_assignments) < len(close_array):
+                cluster_assignments.append(None)
+            while len(cluster_assignments) > len(close_array):
+                cluster_assignments.pop(0)
 
-        # Adjust primary/secondary arrays
-        needed_len = len(close_array)
-        def fix_arrays(st, di, ub, lb):
-            while len(st) < needed_len:
-                st.append(None)
-            while len(st) > needed_len:
-                st.pop(0)
-            while len(di) < needed_len:
-                di.append(None)
-            while len(di) > needed_len:
-                di.pop(0)
-            while len(ub) < needed_len:
-                ub.append(None)
-            while len(ub) > needed_len:
-                ub.pop(0)
-            while len(lb) < needed_len:
-                lb.append(None)
-            while len(lb) > needed_len:
-                lb.pop(0)
+            # Adjust primary/secondary arrays
+            needed_len = len(close_array)
 
-        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
-        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+            def fix_arrays(st, di, ub, lb):
+                while len(st) < needed_len:
+                    st.append(None)
+                while len(st) > needed_len:
+                    st.pop(0)
+                while len(di) < needed_len:
+                    di.append(None)
+                while len(di) > needed_len:
+                    di.pop(0)
+                while len(ub) < needed_len:
+                    ub.append(None)
+                while len(ub) > needed_len:
+                    ub.pop(0)
+                while len(lb) < needed_len:
+                    lb.append(None)
+                while len(lb) > needed_len:
+                    lb.pop(0)
 
-        # Possibly run K-Means
-        data_count = len(close_array)
-        if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
-            start_idx = data_count - TRAINING_DATA_PERIOD
-            vol_data = [x for x in atr_array[start_idx:] if x is not None]
-            if len(vol_data) == TRAINING_DATA_PERIOD:
-                upper_val = max(vol_data)
-                lower_val = min(vol_data)
-                hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
-                mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
-                lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
+            fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+            fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
 
-                hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
-                if hvf and mvf and lvf:
-                    hv_new, mv_new, lv_new = hvf, mvf, lvf
-                    logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
-                else:
-                    logging.warning("K-Means did not finalize due to insufficient data or errors.")
+            # Re-Clustering Logic
+            if DYNAMIC_CLUSTERING and RECLUSTERING_ENABLED:
+                recluster_counter += 1
+                if recluster_counter >= RECLUSTER_INTERVAL:
+                    data_count = len(close_array)
+                    if data_count >= TRAINING_DATA_PERIOD:
+                        start_idx = data_count - TRAINING_DATA_PERIOD
+                        vol_data = [x for x in atr_array[start_idx:] if x is not None]
+                        if len(vol_data) == TRAINING_DATA_PERIOD:
+                            upper_val = max(vol_data)
+                            lower_val = min(vol_data)
+                            hv_init = lower_val + (upper_val - lower_val) * HIGHVOL_PERCENTILE
+                            mv_init = lower_val + (upper_val - lower_val) * MIDVOL_PERCENTILE
+                            lv_init = lower_val + (upper_val - lower_val) * LOWVOL_PERCENTILE
 
-        # Assign cluster & compute supertrend for this bar
-        i = len(close_array)-1
-        assigned_centroid = None
-        vol = atr_array[i]
+                            hvf, mvf, lvf = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                            if hvf and mvf and lvf:
+                                hv_new, mv_new, lv_new = hvf, mvf, lvf
+                                logging.info(f"K-Means Re-Clustering Completed: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+                            else:
+                                logging.warning("K-Means re-clustering failed due to insufficient data or errors.")
+                    recluster_counter = 0  # Reset counter after re-clustering
 
-        if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
-            dA = abs(vol - hv_new)
-            dB = abs(vol - mv_new)
-            dC = abs(vol - lv_new)
-            distances = [dA, dB, dC]
-            c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
-            cluster_assignments[i] = c_idx
-            assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
-        else:
-            logging.warning("Assigned centroid is None. Skipping SuperTrend computation for this bar.")
+            # Assign cluster & compute supertrend for this bar
+            i = len(close_array) - 1
+            assigned_centroid = None
+            vol = atr_array[i]
 
-        if assigned_centroid is not None:
-            compute_supertrend(
-                i, PRIMARY_FACTOR, assigned_centroid,
-                primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand
-            )
-            compute_supertrend(
-                i, SECONDARY_FACTOR, assigned_centroid,
-                secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
-            )
-        else:
-            # Assign default SuperTrend values if centroid is None
-            compute_supertrend(
-                i, PRIMARY_FACTOR, None,
-                primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand
-            )
-            compute_supertrend(
-                i, SECONDARY_FACTOR, None,
-                secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
-            )
+            if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
+                dA = abs(vol - hv_new)
+                dB = abs(vol - mv_new)
+                dC = abs(vol - lv_new)
+                distances = [dA, dB, dC]
+                c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
+                cluster_assignments[i] = c_idx
+                assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+            else:
+                logging.warning("Assigned centroid is None. Skipping SuperTrend computation for this bar.")
 
-        # Update last_secondary_directions
-        if secondary_direction[i] is not None:
-            last_secondary_directions.append(secondary_direction[i])
-            if len(last_secondary_directions) > 35:
-                last_secondary_directions.pop(0)
+            if assigned_centroid is not None:
+                compute_supertrend(
+                    i, PRIMARY_FACTOR, assigned_centroid,
+                    primary_supertrend, primary_direction,
+                    primary_upperBand, primary_lowerBand
+                )
+                compute_supertrend(
+                    i, SECONDARY_FACTOR, assigned_centroid,
+                    secondary_supertrend, secondary_direction,
+                    secondary_upperBand, secondary_lowerBand
+                )
+            else:
+                # Assign default SuperTrend values if centroid is None
+                compute_supertrend(
+                    i, PRIMARY_FACTOR, None,
+                    primary_supertrend, primary_direction,
+                    primary_upperBand, primary_lowerBand
+                )
+                compute_supertrend(
+                    i, SECONDARY_FACTOR, None,
+                    secondary_supertrend, secondary_direction,
+                    secondary_upperBand, secondary_lowerBand
+                )
+
+            # Update last_secondary_directions
+            if secondary_direction[i] is not None:
+                last_secondary_directions.append(secondary_direction[i])
+                if len(last_secondary_directions) > 35:
+                    last_secondary_directions.pop(0)
+
 
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
