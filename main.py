@@ -242,6 +242,17 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
     # Band continuity
+
+        if (downBand > prevLB or close_array[i-1] < prevLB):
+        downBand = downBand
+    else:
+        downBand = prevLB
+    if (upBand < prevUB or close_array[i-1] > prevUB):
+        upBand = upBand
+    else:
+        upBand = prevUB
+
+    # Direction determination
     if prevDir == 1:
         if close_array[i] < downBand:
             newDir = -1  # Switch to Downtrend
