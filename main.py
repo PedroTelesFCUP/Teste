@@ -242,33 +242,24 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
     # Band continuity
-    if (downBand > prevLB or close_array[i-1] < prevLB):
-        downBand = downBand
-    else:
-        downBand = prevLB
-
-    if (upBand < prevUB or close_array[i-1] > prevUB):
-        upBand = upBand
-    else:
-        upBand = prevUB
-
-    # Corrected Direction logic
     if prevDir == 1:
-        # Previously in Uptrend
         if close_array[i] < downBand:
             newDir = -1  # Switch to Downtrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} < downBand {downBand:.2f} ⇒ Switch to Downtrend (-1)")
         else:
             newDir = 1   # Remain Uptrend
-    else:
-        # Previously in Downtrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} >= downBand {downBand:.2f} ⇒ Remain Uptrend (1)")
+    elif prevDir == -1:
         if close_array[i] > upBand:
             newDir = 1   # Switch to Uptrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} > upBand {upBand:.2f} ⇒ Switch to Uptrend (1)")
         else:
             newDir = -1  # Remain Downtrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} <= upBand {upBand:.2f} ⇒ Remain Downtrend (-1)")
 
     # Assign new direction and SuperTrend
     dir_array[i] = newDir
-    st_array[i] = downBand if newDir == -1 else upBand
+    st_array[i] = upBand if newDir == -1 else downBand
     ub_array[i] = upBand
     lb_array[i] = downBand
 
