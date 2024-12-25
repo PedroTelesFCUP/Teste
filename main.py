@@ -38,7 +38,7 @@ QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "1m"  # 1-minute bars
+BINANCE_INTERVAL = "1s"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 15
@@ -514,7 +514,7 @@ def on_message_candle(msg):
                             mv_init = lower_val + (upper_val - lower_val) * MIDVOL_PERCENTILE
                             lv_init = lower_val + (upper_val - lower_val) * LOWVOL_PERCENTILE
 
-                            hvf, mvf, lvf = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                            vol_data, hvf, mvf, lvf = run_kmeans(vol_data, hv_init, mv_init, lv_init)
                             if hvf and mvf and lvf:
                                 hv_new, mv_new, lv_new = hvf, mvf, lvf
                                 logging.info(f"K-Means Re-Clustering Completed: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
