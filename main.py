@@ -38,7 +38,7 @@ QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "1s"  # 1-minute bars
+BINANCE_INTERVAL = "1m"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 15
@@ -50,8 +50,8 @@ MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 1   # seconds
-SIGNAL_CHECK_INTERVAL = 0.5 # check signals every 1 second
+HEARTBEAT_INTERVAL = 31   # seconds
+SIGNAL_CHECK_INTERVAL = 14 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
