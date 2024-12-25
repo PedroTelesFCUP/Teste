@@ -38,7 +38,7 @@ QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "1m"  # 1-minute bars
+BINANCE_INTERVAL = "5s"  # 1-minute bars
 
 # Strategy / logic parameters
 ATR_LEN = 15
@@ -50,8 +50,8 @@ MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 61   # seconds
-SIGNAL_CHECK_INTERVAL = 17 # check signals every 1 second
+HEARTBEAT_INTERVAL = 5   # seconds
+SIGNAL_CHECK_INTERVAL = 2.5 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
@@ -241,38 +241,44 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-    # Band continuity
+    # Corrected Band Continuity
+    if (downBand > prevLB) or (close_array[i-1] < prevLB):
+        adjusted_downBand = downBand
+    else:
+        adjusted_downBand = prevLB
 
-        if (downBand > prevLB or close_array[i-1] < prevLB):
-        downBand = downBand
+    if (upBand < prevUB) or (close_array[i-1] > prevUB):
+        adjusted_upBand = upBand
     else:
-        downBand = prevLB
-    if (upBand < prevUB or close_array[i-1] > prevUB):
-        upBand = upBand
-    else:
-        upBand = prevUB
+        adjusted_upBand = prevUB
+
+    logging.debug(f"Index {i}: Adjusted upBand={adjusted_upBand:.2f}, Adjusted downBand={adjusted_downBand:.2f}")
 
     # Direction determination
     if prevDir == 1:
-        if close_array[i] < downBand:
+        if close_array[i] < adjusted_downBand:
             newDir = -1  # Switch to Downtrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} < downBand {downBand:.2f} ⇒ Switch to Downtrend (-1)")
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} < downBand {adjusted_downBand:.2f} ⇒ Switch to Downtrend (-1)")
         else:
             newDir = 1   # Remain Uptrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} >= downBand {downBand:.2f} ⇒ Remain Uptrend (1)")
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} >= downBand {adjusted_downBand:.2f} ⇒ Remain Uptrend (1)")
     elif prevDir == -1:
-        if close_array[i] > upBand:
+        if close_array[i] > adjusted_upBand:
             newDir = 1   # Switch to Uptrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} > upBand {upBand:.2f} ⇒ Switch to Uptrend (1)")
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} > upBand {adjusted_upBand:.2f} ⇒ Switch to Uptrend (1)")
         else:
             newDir = -1  # Remain Downtrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} <= upBand {upBand:.2f} ⇒ Remain Downtrend (-1)")
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} <= upBand {adjusted_upBand:.2f} ⇒ Remain Downtrend (-1)")
+    else:
+        # Handle unexpected direction values
+        newDir = prevDir
+        logging.warning(f"Index {i}: Unexpected prevDir={prevDir}. Maintaining current direction.")
 
     # Assign new direction and SuperTrend
     dir_array[i] = newDir
     st_array[i] = upBand if newDir == -1 else downBand
-    ub_array[i] = upBand
-    lb_array[i] = downBand
+    ub_array[i] = adjusted_upBand  # Use adjusted bands
+    lb_array[i] = adjusted_downBand
 
     # Detect and log direction shift
     if i > 0 and newDir != prevDir:
@@ -281,14 +287,9 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         logging.info(
             f"Direction Shift Detected at index {i}: {prev_trend} -> {trend} | "
             f"Close: {close_array[i]:.2f} | ST: {st_array[i]:.2f} | "
-            f"Upper Band: {upBand:.2f} | Lower Band: {downBand:.2f}"
+            f"Upper Band: {adjusted_upBand:.2f} | Lower Band: {adjusted_downBand:.2f}"
         )
 
-    # Optional: Detailed debug logging (can be disabled to reduce verbosity)
-    # logging.debug(
-    #     f"Supertrend at index {i}: prevDir={prevDir}, close={close_array[i]}, "
-    #     f"upBand={upBand}, downBand={downBand}, newDir={newDir}, st={st_array[i]}"
-    # )
 
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
