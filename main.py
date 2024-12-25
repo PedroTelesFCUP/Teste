@@ -215,15 +215,12 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         return None, None, None, 0, 0, 0
 
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
-    """
-    Replicates the incremental Pine supertrend logic.
-    """
     if assigned_atr is None:
-        # No volatility => carry forward
-        st_array[i] = st_array[i-1] if i>0 else None
-        dir_array[i] = dir_array[i-1] if i>0 else 1
-        ub_array[i] = ub_array[i-1] if i>0 else None
-        lb_array[i] = lb_array[i-1] if i>0 else None
+        # Carry forward previous values
+        st_array[i] = st_array[i-1] if i > 0 else None
+        dir_array[i] = dir_array[i-1] if i > 0 else 1
+        ub_array[i] = ub_array[i-1] if i > 0 else None
+        lb_array[i] = lb_array[i-1] if i > 0 else None
         return
 
     hl2 = (high_array[i] + low_array[i]) / 2.0
@@ -235,6 +232,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         ub_array[i] = upBand
         lb_array[i] = downBand
         st_array[i] = upBand
+        logging.debug(f"Initial supertrend at index {i}: dir=1, st={upBand}, ub={upBand}, lb={downBand}")
         return
 
     prevDir = dir_array[i-1]
@@ -242,34 +240,52 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
     # Band continuity
-    if (downBand > prevLB or close_array[i-1]<prevLB):
+    if (downBand > prevLB or close_array[i-1] < prevLB):
         downBand = downBand
     else:
         downBand = prevLB
 
-    if (upBand < prevUB or close_array[i-1]>prevUB):
+    if (upBand < prevUB or close_array[i-1] > prevUB):
         upBand = upBand
     else:
         upBand = prevUB
 
-    # If prevDir != -1 => last ST was upper band
-    wasUpper = (prevDir != -1)
-    if wasUpper:
-        # direction = -1 if close>upBand else 1
-        if close_array[i] > upBand:
-            dir_array[i] = -1
-        else:
-            dir_array[i] = 1
-    else:
-        # direction = 1 if close<downBand else -1
+    # Corrected Direction logic
+    if prevDir == 1:
+        # Previously in Uptrend
         if close_array[i] < downBand:
-            dir_array[i] = 1
+            newDir = -1  # Switch to Downtrend
         else:
-            dir_array[i] = -1
+            newDir = 1   # Remain Uptrend
+    else:
+        # Previously in Downtrend
+        if close_array[i] > upBand:
+            newDir = 1   # Switch to Uptrend
+        else:
+            newDir = -1  # Remain Downtrend
 
-    st_array[i] = downBand if dir_array[i] == -1 else upBand
+    # Assign new direction and SuperTrend
+    dir_array[i] = newDir
+    st_array[i] = downBand if newDir == -1 else upBand
     ub_array[i] = upBand
     lb_array[i] = downBand
+
+    # Detect and log direction shift
+    if i > 0 and newDir != prevDir:
+        trend = "Uptrend" if newDir == 1 else "Downtrend"
+        prev_trend = "Uptrend" if prevDir == 1 else "Downtrend"
+        logging.info(
+            f"Direction Shift Detected at index {i}: {prev_trend} -> {trend} | "
+            f"Close: {close_array[i]:.2f} | ST: {st_array[i]:.2f} | "
+            f"Upper Band: {upBand:.2f} | Lower Band: {downBand:.2f}"
+        )
+
+    # Optional: Detailed debug logging (can be disabled to reduce verbosity)
+    # logging.debug(
+    #     f"Supertrend at index {i}: prevDir={prevDir}, close={close_array[i]}, "
+    #     f"upBand={upBand}, downBand={downBand}, newDir={newDir}, st={st_array[i]}"
+    # )
+
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
 def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
