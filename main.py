@@ -10,7 +10,7 @@ from flask import Flask, send_file
 # 3rd-party libraries
 from binance import ThreadedWebsocketManager
 from binance.client import Client
-from alpaca_trade_api import REST as AlpacaREST
+# from alpaca_trade_api import REST as AlpacaREST
 from sklearn.cluster import KMeans
 import numpy as np
 
@@ -28,12 +28,15 @@ logging.basicConfig(
 # Environment variables / credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "YOUR_BINANCE_API_KEY")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "YOUR_BINANCE_SECRET_KEY")
-ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "YOUR_ALPACA_API_KEY")
-ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "YOUR_ALPACA_SECRET_KEY")
+TESTNET_APY_KEY = os.getenv("TEST_API_KEY", "YOUR_TEST_API_KEY")
+TESTNET_APY_SECRET = os.getenv(TEST_SECRET_KEY", "YOUR_TEST_SECRET_KEY")
+# ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "YOUR_ALPACA_API_KEY")
+# ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "YOUR_ALPACA_SECRET_KEY")
 
 # Alpaca endpoints
-ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # paper trading
-SYMBOL_ALPACA = "BTCUSD"  # e.g. "BTCUSD" on Alpaca
+# ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # paper trading
+TESTNET_BASE_URL = "https://testnet.binance.vision/api"  # paper trading
+SYMBOL_TESTNET = "BTCUSDT"  # e.g. "BTCUSD" on Alpaca
 QTY = 0.001               # Example trade size
 
 # Binance symbol & timeframe
@@ -64,8 +67,9 @@ CLUSTER_RUN_ONCE = False       # If True, run K-Means only once after we have th
 
 
 
-# ============== ALPACA & BINANCE CLIENTS ==============
-alpaca_api = AlpacaREST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
+# ============== BINANCE  & BINANCE SPOT TEST CLIENTS ==============
+testnet_api = Client(api_key=TESTNET_API_KEY, api_secret=TESTNET_SECRET_KEY)
+testnet_api.API_URL = TESTNET_BASE_URL
 binance_client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
 
 # ============== GLOBAL DATA STRUCTURES ==============
@@ -295,22 +299,50 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
 def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
     """
-    Places a market order on Alpaca.
+    Places a market order on BINANCE TESTNET
     """
     try:
         logging.info(f"Executing {side.upper()} {qty} {symbol} (SL={stop_loss}, TP={take_profit})")
-        order = alpaca_api.submit_order(
+        # Step 1: Place the main order based on the side
+        if side.lower() == "buy":
+            order = client.order_market_buy(
             symbol=symbol,
-            qty=qty,
-            side=side,
-            type="market",
-            time_in_force="gtc",
-            stop_loss={"stop_price": stop_loss} if stop_loss else None,
-            take_profit={"limit_price": take_profit} if take_profit else None
+            quantity=qty,
         )
-        logging.info(f"Order submitted: {order}")
+        elif side.lower() == "sell":
+            order = client.order_market_sell(
+            symbol=symbol,
+        quantity=qty,
+        )
+        else:
+            raise ValueError(f"Invalid side value: {side}. Must be 'buy' or 'sell'.")
+
+        # Step 2: Place the OCO order based on the main order's side
+        oco_side = "SELL" if side.lower() == "buy" else "BUY"
+
+        oco_order = client.create_oco_order(
+            symbol=symbol,
+            side=oco_side,  # Opposite to the main order's side
+            quantity=qty,
+            stopPrice=stop_loss,  # Stop loss trigger price
+            stopLimitPrice=take_profit,  # Take profit price
+            stopLimitTimeInForce="GTC",  # Good till canceled
+        )
+ 
+
     except Exception as e:
-        logging.error(f"Alpaca order failed: {e}", exc_info=True)
+        logging.error(f"Binance order failed: {e}", exc_info=True)
+
+#        order = alpaca_api.submit_order(
+#            symbol=symbol,
+#            qty=qty,
+#            side=side,
+#            type="market",
+#            time_in_force="gtc",
+#            stop_loss={"stop_price": stop_loss} if stop_loss else None,
+#            take_profit={"limit_price": take_profit} if take_profit else None
+#        )
+#        logging.info(f"Order submitted: {order}")
 
 # ============== LOGGING (HEARTBEAT) ==============
 def heartbeat_logging():
@@ -395,7 +427,7 @@ def check_signals():
                     execute_trade(
                         side="buy",
                         qty=QTY,
-                        symbol=SYMBOL_ALPACA,
+                        symbol=SYMBOL_TESTNET,
                         stop_loss=round(sl, 2),
                         take_profit=round(tp, 2)
                     )
@@ -414,7 +446,7 @@ def check_signals():
                     execute_trade(
                         side="sell",
                         qty=QTY,
-                        symbol=SYMBOL_ALPACA,
+                        symbol=SYMBOL_TESTNET,
                         stop_loss=round(sl, 2),
                         take_profit=round(tp, 2)
                     )
