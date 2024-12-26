@@ -322,7 +322,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         # direction = -1 if close<Band else -1
         if close_array[i] > upBand:
             dir_array[i] = 1
-            ogging.info(f"Direction change!! Bearish to Bullish")
+            logging.info(f"Direction change!! Bearish to Bullish")
         else:
             dir_array[i] = -1
     else:
