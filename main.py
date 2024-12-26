@@ -237,47 +237,57 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         logging.debug(f"Initial supertrend at index {i}: dir=1, st={upBand}, ub={upBand}, lb={downBand}")
         return
 
+
+    prevST = st_array[i-1]
     prevDir = dir_array[i-1]
     prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-    # Band continuity
-    if prevDir == 1:
-        if close_array[i] < downBand:
-            newDir = -1  # Switch to Downtrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} < downBand {downBand:.2f} ⇒ Switch to Downtrend (-1)")
-        else:
-            newDir = 1   # Remain Uptrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} >= downBand {downBand:.2f} ⇒ Remain Uptrend (1)")
-    elif prevDir == -1:
-        if close_array[i] > upBand:
-            newDir = 1   # Switch to Uptrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} > upBand {upBand:.2f} ⇒ Switch to Uptrend (1)")
-        else:
-            newDir = -1  # Remain Downtrend
-            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} <= upBand {upBand:.2f} ⇒ Remain Downtrend (-1)")
 
-    # Assign new direction and SuperTrend
-    dir_array[i] = newDir
-    st_array[i] = upBand if newDir == -1 else downBand
+    # Pine band continuity
+    # lowerBand = lowerBand > prevLB or close[i-1]<prevLB ? lowerBand : prevLB
+    if (downBand > prevLB or close_array[i-1]<prevLB):
+        downBand = downBand
+    else:
+        downBand = prevLB
+
+    # upperBand = upperBand < prevUB or close[i-1]>prevUB ? upperBand : prevUB
+    if (upBand < prevUB or close_array[i-1]>prevUB):
+        upBand = upBand
+    else:
+        upBand = prevUB
+
+    # direction logic
+    # if na(atr[1]) => direction=1 (handled on i=0)
+    # else if prevSuperTrend==prevUpperBand => direction= close>upperBand ? -1 : 1
+    # else => direction= close<lowerBand ? 1 : -1
+    # But in Pine, we check if prevST was the upperBand or lowerBand:
+    # If direction was -1 => previous ST was lowerBand, else upperBand
+    
+    wasUpper = (prevDir != 1)  # If direction != 1 => ST was upperBand
+    
+    if wasUpper:
+        # direction = 1 if close<upBand else -1
+        if close_array[i] < downBand:
+            dir_array[i] = -1
+        else:
+            dir_array[i] = 1
+    else:
+        # direction = -1 if close>downBand else 1
+        if close_array[i] > upBand:
+            dir_array[i] = 1
+        else:
+            dir_array[i] = -1
+
+    # superTrend = direction == -1 ? lowerBand : upperBand
+    if dir_array[i] == 1:
+        st_array[i] = downBand
+    else:
+        st_array[i] = upBand
+
     ub_array[i] = upBand
     lb_array[i] = downBand
-
-    # Detect and log direction shift
-    if i > 0 and newDir != prevDir:
-        trend = "Uptrend" if newDir == 1 else "Downtrend"
-        prev_trend = "Uptrend" if prevDir == 1 else "Downtrend"
-        logging.info(
-            f"Direction Shift Detected at index {i}: {prev_trend} -> {trend} | "
-            f"Close: {close_array[i]:.2f} | ST: {st_array[i]:.2f} | "
-            f"Upper Band: {upBand:.2f} | Lower Band: {downBand:.2f}"
-        )
-
-    # Optional: Detailed debug logging (can be disabled to reduce verbosity)
-    # logging.debug(
-    #     f"Supertrend at index {i}: prevDir={prevDir}, close={close_array[i]}, "
-    #     f"upBand={upBand}, downBand={downBand}, newDir={newDir}, st={st_array[i]}"
-    # )
+    
 
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
@@ -418,7 +428,7 @@ def check_signals():
             msg += f"In Position: {in_position} ({position_side})\n"
             msg += f"Entry Price: {entry_price}\n"
             msg += "=============="
-        logging.info(msg)
+            logging.info(msg)
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
