@@ -270,12 +270,14 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         # direction = -1 if close<Band else -1
         if close_array[i] > upBand:
             dir_array[i] = 1
+            ogging.info(f"Direction change!! Bearish to Bullish")
         else:
             dir_array[i] = -1
     else:
         # direction = -1 if close>downBand else 1
         if close_array[i] < downBand:
             dir_array[i] = -1
+            logging.info(f"Direction change!! Bullish to Bearish")
         else:
             dir_array[i] = 1
 
@@ -327,7 +329,7 @@ def heartbeat_logging():
 
                 cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
                 msg = "\n=== Heartbeat ===\n"
-                msg += "Bot is alive!"
+                msg += "Bot is alive!\n"
                 msg += "=============="
                 logging.info(msg)
             last_heartbeat_time = now
@@ -426,7 +428,10 @@ def check_signals():
             msg += f"Primary Dir: {p_dir}\n"
             msg += f"Secondary Dir: {s_dir}\n"
             msg += f"Cluster: {cluster_str}\n"
-            msg += f"ATR: {atr}\n"
+            msg += f"PriLB: {prim_LB}\n"
+            msg += f"PriUB: {prim_UB}\n"
+            msg += f"SecLB: {sec_LB}\n"
+            msg += f"SecUB: {sec_UB}\n"
             msg += f"PriST: {prim_st}\n"
             msg += f"SecST: {sec_st}\n"
             msg += f"In Position: {in_position} ({position_side})\n"
