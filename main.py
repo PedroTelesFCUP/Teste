@@ -353,12 +353,12 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
         logging.info(f"Executing {side.upper()} {qty} {symbol} (SL={stop_loss}, TP={take_profit})")
         # Step 1: Place the main order based on the side
         if side.lower() == "buy":
-            order = client.order_market_buy(
+            order = testnet_api.order_market_buy(
             symbol=symbol,
             quantity=qty,
         )
         elif side.lower() == "sell":
-            order = client.order_market_sell(
+            order = testnet_api.order_market_sell(
             symbol=symbol,
         quantity=qty,
         )
@@ -368,7 +368,7 @@ def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
         # Step 2: Place the OCO order based on the main order's side
         oco_side = "SELL" if side.lower() == "buy" else "BUY"
 
-        oco_order = client.create_oco_order(
+        oco_order = testnet_api.create_oco_order(
             symbol=symbol,
             side=oco_side,  # Opposite to the main order's side
             quantity=qty,
