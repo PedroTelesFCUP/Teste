@@ -264,7 +264,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     # But in Pine, we check if prevST was the upperBand or lowerBand:
     # If direction was -1 => previous ST was lowerBand, else upperBand
     
-    wasUpper = (prevDir = -1)  # If direction = -1 => ST was upperBand
+    wasUpper = (prevDir == -1)  # If direction = -1 => ST was upperBand
     
     if wasUpper:
         # direction = -1 if close<Band else -1
