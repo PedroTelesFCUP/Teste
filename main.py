@@ -398,7 +398,7 @@ def check_signals():
                     in_position = True
                     position_side = "short"
                     entry_price = current_price
-
+            cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
             msg = "\n=== Heartbeat ===\n"
             msg += f"Array Lengths:\n"
             msg += f"  time_array: {len(time_array)}\n"
