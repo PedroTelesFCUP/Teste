@@ -51,7 +51,7 @@ LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
 HEARTBEAT_INTERVAL = 1   # seconds
-SIGNAL_CHECK_INTERVAL = 0.5 # check signals every 1 second
+SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
@@ -311,28 +311,11 @@ def heartbeat_logging():
         if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
             if len(close_array) > 0:
                 i = len(close_array)-1
-                p_dir = primary_direction[i] if i < len(primary_direction) else 'N/A'
-                s_dir = secondary_direction[i] if i < len(secondary_direction) else 'N/A'
-                c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
-                atr = atr_array[i] if i < len(atr_array) else 'N/A'
-                pri_st = primary_supertrend[i] if i < len(primary_supertrend) else 'N/A'
-                sec_st = secondary_supertrend[i] if i < len(secondary_supertrend) else 'N/A'
 
-                cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
                 msg = "\n=== Heartbeat ===\n"
-                msg += f"Last Price: {close_array[i]:.2f}\n"
-                msg += f"Primary Dir: {p_dir}\n"
-                msg += f"Secondary Dir: {s_dir}\n"
-                msg += f"Cluster: {cluster_str}\n"
-                msg += f"ATR: {atr}\n"
-                msg += f"PriST: {pri_st}\n"
-                msg += f"SecST: {sec_st}\n"
-                msg += f"In Position: {in_position} ({position_side})\n"
-                msg += f"Entry Price: {entry_price}\n"
-                msg += "=============="
                 logging.info(msg)
             last_heartbeat_time = now
-        time.sleep(1)
+
 
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
@@ -352,6 +335,9 @@ def check_signals():
             # Gather signals
             p_dir = primary_direction[i]
             s_dir = secondary_direction[i]
+            atr = atr_array[i] 
+            pri_st = primary_supertrend[i] 
+            sec_st = secondary_supertrend[i] 
             c_idx = cluster_assignments[i]
             current_price = close_array[i]
 
@@ -413,6 +399,34 @@ def check_signals():
                     position_side = "short"
                     entry_price = current_price
 
+        msg = "\n=== Heartbeat ===\n"
+        msg += f"Array Lengths:\n"
+        msg += f"  time_array: {len(time_array)}\n"
+        msg += f"  high_array: {len(high_array)}\n"
+        msg += f"  low_array: {len(low_array)}\n"
+        msg += f"  close_array: {len(close_array)}\n"
+        msg += f"  atr_array: {len(atr_array)}\n"
+        msg += f"  cluster_assignments: {len(cluster_assignments)}\n"
+        msg += f"  primary_supertrend: {len(primary_supertrend)}\n"
+        msg += f"  primary_direction: {len(primary_direction)}\n"
+        msg += f"  primary_upperBand: {len(primary_upperBand)}\n"
+        msg += f"  primary_lowerBand: {len(primary_lowerBand)}\n"
+        msg += f"  secondary_supertrend: {len(secondary_supertrend)}\n"
+        msg += f"  secondary_direction: {len(secondary_direction)}\n"
+        msg += f"  secondary_upperBand: {len(secondary_upperBand)}\n"
+        msg += f"  secondary_lowerBand: {len(secondary_lowerBand)}\n"
+        msg += f"  last_secondary_directions: {len(last_secondary_directions)}\n"
+        msg += f"Last Price: {close_array[i]:.2f}\n"
+        msg += f"Primary Dir: {p_dir}\n"
+        msg += f"Secondary Dir: {s_dir}\n"
+        msg += f"Cluster: {cluster_str}\n"
+        msg += f"ATR: {atr}\n"
+        msg += f"PriST: {pri_st}\n"
+        msg += f"SecST: {sec_st}\n"
+        msg += f"In Position: {in_position} ({position_side})\n"
+        msg += f"Entry Price: {entry_price}\n"
+        msg += "=============="
+        logging.info(msg)
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
@@ -482,8 +496,8 @@ def on_message_candle(msg):
             while len(lb) > needed_len:
                 lb.pop(0)
 
-#        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
-#        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
 
         # Possibly run K-Means
         data_count = len(close_array)
@@ -553,6 +567,7 @@ def on_message_candle(msg):
             last_secondary_directions.append(secondary_direction[i])
             if len(last_secondary_directions) > 35:
                 last_secondary_directions.pop(0)
+        
 
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
