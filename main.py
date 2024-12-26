@@ -6,7 +6,7 @@ import statistics
 import logging
 import threading
 import pandas as pd
-from flask import Flask, send_file, jsonify
+from flask import Flask, send_file, jsonify, request, Response
 # 3rd-party libraries
 from binance import ThreadedWebsocketManager
 from binance.client import Client
@@ -106,9 +106,31 @@ entry_price = None
 
 # For logging
 last_heartbeat_time = 0
-
+#======= FLASKING =======
 # Flask Server
 app = Flask(__name__)
+
+USERNAME = os.getenv("APP_USERNAME", "admin")  # Default username
+PASSWORD = os.getenv("APP_PASSWORD", "password")  # Default password
+
+def check_auth(username, password):
+    """Validate the username and password."""
+    return username == USERNAME and password == PASSWORD
+
+def authenticate():
+    """Send a 401 response that enables basic authentication."""
+    return Response(
+        "Could not verify your access level for that URL.\n"
+        "You have to login with proper credentials", 401,
+        {"WWW-Authenticate": 'Basic realm="Login Required"'}
+    )
+
+@app.before_request
+def require_auth():
+    """Require authentication for every request."""
+    auth = request.authorization
+    if not auth or not check_auth(auth.username, auth.password):
+        return authenticate()
 
 @app.route("/")
 def home():
