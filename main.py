@@ -264,26 +264,26 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     # But in Pine, we check if prevST was the upperBand or lowerBand:
     # If direction was -1 => previous ST was lowerBand, else upperBand
     
-    wasUpper = (prevDir != 1)  # If direction != 1 => ST was upperBand
+    wasUpper = (prevDir = -1)  # If direction = -1 => ST was upperBand
     
     if wasUpper:
-        # direction = 1 if close<upBand else -1
-        if close_array[i] < downBand:
-            dir_array[i] = -1
-        else:
-            dir_array[i] = 1
-    else:
-        # direction = -1 if close>downBand else 1
+        # direction = -1 if close<Band else -1
         if close_array[i] > upBand:
             dir_array[i] = 1
         else:
             dir_array[i] = -1
+    else:
+        # direction = -1 if close>downBand else 1
+        if close_array[i] < downBand:
+            dir_array[i] = -1
+        else:
+            dir_array[i] = 1
 
     # superTrend = direction == -1 ? lowerBand : upperBand
-    if dir_array[i] == 1:
-        st_array[i] = downBand
-    else:
+    if dir_array[i] == -1:
         st_array[i] = upBand
+    else:
+        st_array[i] = downBand
 
     ub_array[i] = upBand
     lb_array[i] = downBand
@@ -353,6 +353,10 @@ def check_signals():
             s_dir = secondary_direction[i]
             prim_st = primary_supertrend[i]
             sec_st = secondary_supertrend[i]
+            prim_UB = primary_upperBand[i]
+            prim_LB = primary_lowerBand[i]
+            sec_UB = secondary_upperBand[i]
+            sec_LB = secondary_lowerBand[i]
             atr = atr_array[i]
             c_idx = cluster_assignments[i]
             current_price = close_array[i]
