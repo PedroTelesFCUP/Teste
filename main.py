@@ -50,8 +50,8 @@ MIDVOL_PERCENTILE = 0.5
 LOWVOL_PERCENTILE = 0.25
 
 # Heartbeat intervals
-HEARTBEAT_INTERVAL = 1   # seconds
-SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
+HEARTBEAT_INTERVAL = 5   # seconds
+SIGNAL_CHECK_INTERVAL = 0.5 # check signals every 1 second
 
 # Keep only the last MAX_CANDLES in memory
 MAX_CANDLES = 200
@@ -216,8 +216,7 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         logging.error(f"K-Means clustering failed: {e}", exc_info=True)
         return None, None, None, 0, 0, 0
 
-# ============== CALCULATE SUPERTREND ==============
-def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array, close_array):
+def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
     if assigned_atr is None:
         # Carry forward previous values
         st_array[i] = st_array[i-1] if i > 0 else None
@@ -230,57 +229,55 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     upBand = hl2 + factor * assigned_atr
     downBand = hl2 - factor * assigned_atr
 
-    # Previous bands
+    if i == 0:
+        dir_array[i] = 1
+        ub_array[i] = upBand
+        lb_array[i] = downBand
+        st_array[i] = upBand
+        logging.debug(f"Initial supertrend at index {i}: dir=1, st={upBand}, ub={upBand}, lb={downBand}")
+        return
+
+    prevDir = dir_array[i-1]
     prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-    # Adjust bands for continuity with original conditions
-    adjusted_downBand = downBand if downBand > prevLB else prevLB
-    adjusted_upBand = upBand if upBand < prevUB else prevUB
-
-    prevst = st_array[i-1] if i > 0 else None  # Previous SuperTrend for fallback
-    adjustedst = None 
-
-    # Determine direction and update SuperTrend
-    if dir_array[i-1] == 1:  # Previously in uptrend
-        if close_array[i] < adjusted_downBand:
-            newDir = -1  # Switch to downtrend
-            adjustedst = adjusted_upBand  # SuperTrend switches to upper band
+    # Band continuity
+    if prevDir == 1:
+        if close_array[i] < downBand:
+            newDir = -1  # Switch to Downtrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} < downBand {downBand:.2f} ⇒ Switch to Downtrend (-1)")
         else:
-            newDir = 1  # Remain in uptrend
-            adjustedst = adjusted_downBand  # SuperTrend remains lower band
-    elif dir_array[i-1] == -1:  # Previously in downtrend
-        if close_array[i] > adjusted_upBand:
-            newDir = 1  # Switch to uptrend
-            adjustedst = adjusted_downBand  # SuperTrend switches to lower band
+            newDir = 1   # Remain Uptrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} >= downBand {downBand:.2f} ⇒ Remain Uptrend (1)")
+    elif prevDir == -1:
+        if close_array[i] > upBand:
+            newDir = 1   # Switch to Uptrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} > upBand {upBand:.2f} ⇒ Switch to Uptrend (1)")
         else:
-            newDir = -1  # Remain in downtrend
-            adjustedst = adjusted_upBand  # SuperTrend remains upper band
-    else:
-        # Handle unexpected direction values (fallback)
-        newDir = dir_array[i-1] if i > 0 else 1
-        adjustedst = prevst  # Keep SuperTrend unchanged if direction is unexpected
+            newDir = -1  # Remain Downtrend
+            logging.debug(f"Index {i}: Close price {close_array[i]:.2f} <= upBand {upBand:.2f} ⇒ Remain Downtrend (-1)")
 
-    # Assign direction
+    # Assign new direction and SuperTrend
     dir_array[i] = newDir
-
-    # Assign bands
-    ub_array[i] = adjusted_upBand
-    lb_array[i] = adjusted_downBand
-
-    # Assign SuperTrend
-    st_array[i] = adjustedst
+    st_array[i] = upBand if newDir == -1 else downBand
+    ub_array[i] = upBand
+    lb_array[i] = downBand
 
     # Detect and log direction shift
-    if i > 0 and dir_array[i] != dir_array[i-1]:
-        trend = "Uptrend" if dir_array[i] == 1 else "Downtrend"
-        prev_trend = "Uptrend" if dir_array[i-1] == 1 else "Downtrend"
+    if i > 0 and newDir != prevDir:
+        trend = "Uptrend" if newDir == 1 else "Downtrend"
+        prev_trend = "Uptrend" if prevDir == 1 else "Downtrend"
         logging.info(
             f"Direction Shift Detected at index {i}: {prev_trend} -> {trend} | "
             f"Close: {close_array[i]:.2f} | ST: {st_array[i]:.2f} | "
-            f"Upper Band: {adjusted_upBand:.2f} | Lower Band: {adjusted_downBand:.2f}"
+            f"Upper Band: {upBand:.2f} | Lower Band: {downBand:.2f}"
         )
 
+    # Optional: Detailed debug logging (can be disabled to reduce verbosity)
+    # logging.debug(
+    #     f"Supertrend at index {i}: prevDir={prevDir}, close={close_array[i]}, "
+    #     f"upBand={upBand}, downBand={downBand}, newDir={newDir}, st={st_array[i]}"
+    # )
 
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
@@ -311,11 +308,20 @@ def heartbeat_logging():
         if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
             if len(close_array) > 0:
                 i = len(close_array)-1
+                p_dir = primary_direction[i] if i < len(primary_direction) else 'N/A'
+                s_dir = secondary_direction[i] if i < len(secondary_direction) else 'N/A'
+                c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
+                atr = atr_array[i] if i < len(atr_array) else 'N/A'
+                pri_st = primary_supertrend[i] if i < len(primary_supertrend) else 'N/A'
+                sec_st = secondary_supertrend[i] if i < len(secondary_supertrend) else 'N/A'
 
+                cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
                 msg = "\n=== Heartbeat ===\n"
+                msg += "Bot is alive!"
+                msg += "=============="
                 logging.info(msg)
             last_heartbeat_time = now
-
+        time.sleep(1)
 
 # ============== SIGNAL CHECKS FOR LONG & SHORT ==============
 def check_signals():
@@ -335,11 +341,12 @@ def check_signals():
             # Gather signals
             p_dir = primary_direction[i]
             s_dir = secondary_direction[i]
-            atr = atr_array[i] 
-            pri_st = primary_supertrend[i] 
-            sec_st = secondary_supertrend[i] 
+            prim_st = primary_supertrend[i]
+            sec_st = secondart_supertrend[i]
+            atr = atr_array[i]
             c_idx = cluster_assignments[i]
             current_price = close_array[i]
+            
 
             if p_dir is None or s_dir is None or c_idx is None:
                 time.sleep(SIGNAL_CHECK_INTERVAL)
@@ -363,7 +370,7 @@ def check_signals():
                 # ============ LONG ENTRY ============
                 if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
                     # Stop-loss = current bar's low
-                    sl = low_array[i]
+                    sl = sec_st
                     # Distance from entry to SL
                     dist = current_price - sl
                     # Take-profit = entry + 1.5 * dist
@@ -383,7 +390,7 @@ def check_signals():
                 # ============ SHORT ENTRY ============
                 if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
                     # Stop-loss = current bar's high
-                    sl = high_array[i]
+                    sl = sec_st
                     dist = sl - current_price
                     # Take-profit = entry - 1.5 * dist
                     tp = current_price - (1.5 * dist)
@@ -398,35 +405,20 @@ def check_signals():
                     in_position = True
                     position_side = "short"
                     entry_price = current_price
+                    
             cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
             msg = "\n=== Heartbeat ===\n"
-            msg += f"Array Lengths:\n"
-            msg += f"  time_array: {len(time_array)}\n"
-            msg += f"  high_array: {len(high_array)}\n"
-            msg += f"  low_array: {len(low_array)}\n"
-            msg += f"  close_array: {len(close_array)}\n"
-            msg += f"  atr_array: {len(atr_array)}\n"
-            msg += f"  cluster_assignments: {len(cluster_assignments)}\n"
-            msg += f"  primary_supertrend: {len(primary_supertrend)}\n"
-            msg += f"  primary_direction: {len(primary_direction)}\n"
-            msg += f"  primary_upperBand: {len(primary_upperBand)}\n"
-            msg += f"  primary_lowerBand: {len(primary_lowerBand)}\n"
-            msg += f"  secondary_supertrend: {len(secondary_supertrend)}\n"
-            msg += f"  secondary_direction: {len(secondary_direction)}\n"
-            msg += f"  secondary_upperBand: {len(secondary_upperBand)}\n"
-            msg += f"  secondary_lowerBand: {len(secondary_lowerBand)}\n"
-            msg += f"  last_secondary_directions: {len(last_secondary_directions)}\n"
             msg += f"Last Price: {close_array[i]:.2f}\n"
             msg += f"Primary Dir: {p_dir}\n"
             msg += f"Secondary Dir: {s_dir}\n"
             msg += f"Cluster: {cluster_str}\n"
             msg += f"ATR: {atr}\n"
-            msg += f"PriST: {pri_st}\n"
+            msg += f"PriST: {prim_st}\n"
             msg += f"SecST: {sec_st}\n"
             msg += f"In Position: {in_position} ({position_side})\n"
             msg += f"Entry Price: {entry_price}\n"
             msg += "=============="
-            logging.info(msg)
+        logging.info(msg)
 
         except Exception as e:
             logging.error(f"Error in check_signals loop: {e}", exc_info=True)
@@ -538,36 +530,33 @@ def on_message_candle(msg):
             compute_supertrend(
                 i, PRIMARY_FACTOR, assigned_centroid,
                 primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand,
-                close_array
+                primary_upperBand, primary_lowerBand
             )
             compute_supertrend(
                 i, SECONDARY_FACTOR, assigned_centroid,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand,
-                close_array
+                secondary_upperBand, secondary_lowerBand
             )
         else:
             # Assign default SuperTrend values if centroid is None
             compute_supertrend(
                 i, PRIMARY_FACTOR, None,
                 primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand,
-                close_array
+                primary_upperBand, primary_lowerBand
             )
             compute_supertrend(
                 i, SECONDARY_FACTOR, None,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand,
-                close_array
+                secondary_upperBand, secondary_lowerBand
             )
+            
 
+        
         # Update last_secondary_directions
         if secondary_direction[i] is not None:
             last_secondary_directions.append(secondary_direction[i])
             if len(last_secondary_directions) > 35:
                 last_secondary_directions.pop(0)
-        
 
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
