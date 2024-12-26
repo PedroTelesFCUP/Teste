@@ -352,7 +352,7 @@ def check_signals():
             p_dir = primary_direction[i]
             s_dir = secondary_direction[i]
             prim_st = primary_supertrend[i]
-            sec_st = secondart_supertrend[i]
+            sec_st = secondary_supertrend[i]
             atr = atr_array[i]
             c_idx = cluster_assignments[i]
             current_price = close_array[i]
