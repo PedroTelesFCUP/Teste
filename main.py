@@ -6,13 +6,13 @@ import statistics
 import logging
 import threading
 import pandas as pd
-from flask import Flask, send_file
+from flask import Flask, send_file, jsonify
 # 3rd-party libraries
 from binance import ThreadedWebsocketManager
 from binance.client import Client
 # from alpaca_trade_api import REST as AlpacaREST
-from sklearn.cluster import KMeans
-import numpy as np
+# from sklearn.cluster import KMeans
+# import numpy as np
 
 # ============== CONFIGURATION ==============
 LOG_LEVEL = logging.INFO
@@ -121,6 +121,32 @@ def download_logs():
         return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
+
+@app.route("/orders", methods=["GET"])
+def get_orders():
+    try:
+        # Fetch all orders for a specific symbol
+        symbol = "BTCUSDT"  # Replace with the trading pair you use
+        orders = client.get_all_orders(symbol=symbol)
+
+        # Format the orders into a readable structure
+        formatted_orders = [
+            {
+                "Order ID": order["orderId"],
+                "Status": order["status"],
+                "Side": order["side"],
+                "Price": order["price"],
+                "Quantity": order["origQty"],
+                "Executed Quantity": order["executedQty"],
+                "Time": order["time"]
+            }
+            for order in orders
+        ]
+
+        return render_template("orders.html", orders=formatted_orders)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ============== HELPER FUNCTIONS ==============
 def wilder_smoothing(values, period):
