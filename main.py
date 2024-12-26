@@ -217,7 +217,7 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         return None, None, None, 0, 0, 0
 
 # ============== CALCULATE SUPERTREND ==============
-def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
+def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array, close_array):
     if assigned_atr is None:
         # Carry forward previous values
         st_array[i] = st_array[i-1] if i > 0 else None
@@ -235,8 +235,8 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
     # Adjust bands for continuity with original conditions
-    adjusted_downBand = downBand if (downBand > prevLB or close_array[i-1] < prevLB) else prevLB
-    adjusted_upBand = upBand if (upBand < prevUB or close_array[i-1] > prevUB) else prevUB
+    adjusted_downBand = downBand if downBand > prevLB else prevLB
+    adjusted_upBand = upBand if upBand < prevUB else prevUB
 
     prevst = st_array[i-1] if i > 0 else None  # Previous SuperTrend for fallback
     adjustedst = None 
@@ -482,8 +482,8 @@ def on_message_candle(msg):
             while len(lb) > needed_len:
                 lb.pop(0)
 
-        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
-        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+#        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+#        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
 
         # Possibly run K-Means
         data_count = len(close_array)
@@ -524,24 +524,28 @@ def on_message_candle(msg):
             compute_supertrend(
                 i, PRIMARY_FACTOR, assigned_centroid,
                 primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand
+                primary_upperBand, primary_lowerBand,
+                close_array
             )
             compute_supertrend(
                 i, SECONDARY_FACTOR, assigned_centroid,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
+                secondary_upperBand, secondary_lowerBand,
+                close_array
             )
         else:
             # Assign default SuperTrend values if centroid is None
             compute_supertrend(
                 i, PRIMARY_FACTOR, None,
                 primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand
+                primary_upperBand, primary_lowerBand,
+                close_array
             )
             compute_supertrend(
                 i, SECONDARY_FACTOR, None,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
+                secondary_upperBand, secondary_lowerBand,
+                close_array
             )
 
         # Update last_secondary_directions
