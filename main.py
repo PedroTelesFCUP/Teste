@@ -285,7 +285,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         dir_array[i] = 1
         ub_array[i] = upBand
         lb_array[i] = downBand
-        st_array[i] = upBand
+        st_array[i] = downBand
         logging.debug(f"Initial supertrend at index {i}: dir=1, st={upBand}, ub={upBand}, lb={downBand}")
         return
 
