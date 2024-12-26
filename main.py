@@ -28,14 +28,14 @@ logging.basicConfig(
 # Environment variables / credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "YOUR_BINANCE_API_KEY")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "YOUR_BINANCE_SECRET_KEY")
-TESTNET_API_KEY = os.getenv("TEST_API_KEY", "YOUR_TEST_API_KEY")
-TESTNET_SECRET_KEY = os.getenv("TEST_SECRET_KEY", "YOUR_TEST_SECRET_KEY")
+TESTNET_API_KEY = os.getenv("TESTNET_API_KEY", "YOUR_TEST_API_KEY")
+TESTNET_SECRET_KEY = os.getenv("TESTNET_SECRET_KEY", "YOUR_TEST_SECRET_KEY")
 # ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "YOUR_ALPACA_API_KEY")
 # ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "YOUR_ALPACA_SECRET_KEY")
 
 # Alpaca endpoints
 # ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # paper trading
-TESTNET_BASE_URL = "https://testnet.binance.vision/api"  # paper trading
+TESTNET_BASE_URL = "https://testnet.binance.vision"  # paper trading
 SYMBOL_TESTNET = "BTCUSDT"  # e.g. "BTCUSD" on Alpaca
 QTY = 0.001               # Example trade size
 
