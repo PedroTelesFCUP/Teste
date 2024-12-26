@@ -351,15 +351,6 @@ def heartbeat_logging():
         now = time.time()
         if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
             if len(close_array) > 0:
-                i = len(close_array)-1
-                p_dir = primary_direction[i] if i < len(primary_direction) else 'N/A'
-                s_dir = secondary_direction[i] if i < len(secondary_direction) else 'N/A'
-                c_idx = cluster_assignments[i] if i < len(cluster_assignments) else None
-                atr = atr_array[i] if i < len(atr_array) else 'N/A'
-                pri_st = primary_supertrend[i] if i < len(primary_supertrend) else 'N/A'
-                sec_st = secondary_supertrend[i] if i < len(secondary_supertrend) else 'N/A'
-
-                cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None (0=High,1=Med,2=Low)"
                 msg = "\n=== Heartbeat ===\n"
                 msg += "Bot is alive!\n"
                 msg += "=============="
@@ -416,7 +407,7 @@ def check_signals():
 
 
                 # ============ LONG ENTRY ============
-                if (not in_position) and bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
+                if bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
                     # Stop-loss = current bar's low
                     sl = sec_st
                     # Distance from entry to SL
@@ -436,7 +427,7 @@ def check_signals():
                     entry_price = current_price
 
                 # ============ SHORT ENTRY ============
-                if (not in_position) and bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
+                if bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
                     # Stop-loss = current bar's high
                     sl = sec_st
                     dist = sl - current_price
