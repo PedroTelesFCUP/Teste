@@ -149,7 +149,7 @@ def get_orders():
     try:
         # Fetch all orders for a specific symbol
         symbol = "BTCUSDT"  # Replace with the trading pair you use
-        orders = client.get_all_orders(symbol=symbol)
+        orders = testnet_api.get_all_orders(symbol=symbol)
 
         # Format the orders into a readable structure
         formatted_orders = [
