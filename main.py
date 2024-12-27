@@ -324,26 +324,23 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     lb_array[i] = final_lb
 
     # SuperTrend Indicator Calculation
-    rev_st = st_array[i-1]
+    prev_st = st_array[i-1]
 
     if prev_st is None:
         # Fallback if previous SuperTrend is not set
         st_array[i] = final_lb
         dir_array[i] = 1
-    elif prev_st == final_ub:
-        if close_array[i] < final_ub:  # Use current close
-            st_array[i] = final_ub
-            dir_array[i] = -1
-        else:
-            st_array[i] = final_lb
-            dir_array[i] = 1
-    elif prev_st == final_lb:
-        if close_array[i] > final_lb:
-            st_array[i] = final_lb
-            dir_array[i] = 1
-        else:
-            st_array[i] = final_ub
-            dir_array[i] = -1
+        
+
+    if close_array[i] > final_ub:  # Use current close
+        st_array[i] = final_lb
+        dir_array[i] = 1
+        
+
+    if close_array[i] < final_lb:
+        st_array[i] = final_ub
+        dir_array[i] = -1
+
 else:
     # Handle unexpected cases by defaulting to bullish
     st_array[i] = final_lb
