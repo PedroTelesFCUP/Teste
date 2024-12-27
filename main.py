@@ -156,9 +156,11 @@ async def start_binance_websocket():
             close = float(kline['c'])
             process_candle(high, low, close)
 
-    bsm.start_kline_socket(callback=handle_message, symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL)
-    bsm.start()
-    await asyncio.sleep(10**6)  # Keep the WebSocket running
+    async with bsm.kline_socket(symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL) as stream:
+        while True:
+            msg = await stream.recv()
+            handle_message(msg)
+
     await client.close_connection()
 
 # ============== MAIN ==============
