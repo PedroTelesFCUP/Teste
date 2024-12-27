@@ -338,8 +338,8 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     elif close_array[i] < final_lb:
         st_array[i] = final_ub
         dir_array[i] = -1
-    elif (close_array[i] < final_ub and close_array[i] > final_lb):
-        st_array[i] = prev_st
+    elif final_lb <= close_array[i] <= final_ub:  # Check if within bounds    
+        st_array[i] = final_ub if prev_dir == -1 else final_lb
         dir_array[i] = prev_dir
 
     # Optional: Add logging for debugging
