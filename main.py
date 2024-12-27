@@ -338,8 +338,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     elif close_array[i] < final_lb:
         st_array[i] = final_ub
         dir_array[i] = -1
-    else:
-        # Handle unexpected cases by defaulting to bullish
+    elif (close_array[i] < final_ub and close_array[i] > final_lb):
         st_array[i] = prev_st
         dir_array[i] = prev_dir
 
