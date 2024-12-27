@@ -305,16 +305,16 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     # Retrieve previous bands and close
     prev_ub = ub_array[i-1] if ub_array[i-1] is not None else basic_ub
     prev_lb = lb_array[i-1] if lb_array[i-1] is not None else basic_lb
-    prev_close = close_array[i-1]
+    close = close_array[i]
 
     # Final Upper Band Calculation
-    if basic_ub < prev_ub or prev_close > prev_ub:
+    if basic_ub < prev_ub or close > prev_ub:
         final_ub = basic_ub
     else:
         final_ub = prev_ub
 
     # Final Lower Band Calculation
-    if basic_lb > prev_lb or prev_close < prev_lb:
+    if basic_lb > prev_lb or close < prev_lb:
         final_lb = basic_lb
     else:
         final_lb = prev_lb
@@ -332,15 +332,19 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         st_array[i] = final_lb
         dir_array[i] = 1
     
-    if close_array[i] > final_ub:  # Use current close
-        st_array[i] = final_lb
+    if prev_dir==1 and close <= final_ub:  # Use current close
         dir_array[i] = 1
-    elif close_array[i] < final_lb:
-        st_array[i] = final_ub
+    elif prev_dir==-1 and close >= final_lb:
         dir_array[i] = -1
-    elif final_lb <= close_array[i] <= final_ub:  # Check if within bounds    
-        st_array[i] = final_ub if prev_dir == -1 else final_lb
-        dir_array[i] = prev_dir
+    elif close > final_ub: 
+        dir_array[i] = 1
+    else:
+        dir_array[i]=-1
+
+    if dir_array[i] == 1:
+        st_array[i] = final_lb
+    else: 
+        st_array[i] = final_ub
 
     # Optional: Add logging for debugging
     # logging.debug(f"Index {i}: ST={st_array[i]}, Dir={dir_array[i]}, UB={final_ub}, LB={final_lb}")
