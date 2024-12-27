@@ -60,7 +60,8 @@ SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
 MAX_CANDLES = 200
 
 # Number of candles to determine pullback pattern
-MAX_PULLBACK_CANDLES =30
+MAX_PULLBACK_CANDLES = 30
+MIN_PULLBACK_CANDLES = 4
 
 # only once?
 CLUSTER_RUN_ONCE = False       # If True, run K-Means only once after we have the training period data
@@ -422,10 +423,10 @@ def check_signals():
                 indices = list(range(len(close_array) - 3, len(close_array)))
 
                 # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
-                bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+                bullish_bearish_bullish = (recent_3 == [1, -1, 1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES) and (indices[-1] - indices[0] >= MIN_PULLBACK_CANDLES))
     
                 # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
-                bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES))
+                bearish_bearish_bearish = (recent_3 == [-1, 1, -1] and (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES) and (indices[-1] - indices[0] >= MIN_PULLBACK_CANDLES))
 
 
 
@@ -474,6 +475,7 @@ def check_signals():
             msg += f"Primary Dir: {p_dir}\n"
             msg += f"Secondary Dir: {s_dir}\n"
             msg += f"Cluster: {cluster_str}\n"
+            msg += f"ATR: {atr}\n"
             msg += f"PriLB: {prim_LB}\n"
             msg += f"PriUB: {prim_UB}\n"
             msg += f"SecLB: {sec_LB}\n"
