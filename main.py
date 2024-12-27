@@ -48,7 +48,7 @@ high_values = deque(maxlen=100)
 low_values = deque(maxlen=100)
 close_values = deque(maxlen=100)
 position = None
-latest_values = {"ATR": None, "RSI": None, "MACD Line": None, "Signal Line": None, "Position": None, "Latest Close": None}
+latest_values = {"ATR": None, "RSI": None, "MACD Line": None, "Signal Line": None, "Trend Direction": None, "Latest Close": None}
 
 # ============== AUTHENTICATION ==============
 def check_auth(username, password):
@@ -84,32 +84,53 @@ def get_orders():
     return jsonify({"message": "Order fetching is not implemented in this async example."})
 
 # ============== INDICATOR CALCULATIONS ==============
-def calculate_atr(high, low, close):
+def calculate_atr(high, low, close, period):
     tr1 = high - low
-    tr2 = np.abs(high[1:] - close[:-1])  # High of current candle minus Close of previous candle
-    tr3 = np.abs(low[1:] - close[:-1])   # Low of current candle minus Close of previous candle
-    tr = np.maximum(tr1[1:], np.maximum(tr2, tr3))  # Take the max of the three TR values
-    tr = np.concatenate(([tr1[0]], tr))  # Include the TR of the first candle
+    tr2 = np.abs(high[1:] - close[:-1])
+    tr3 = np.abs(low[1:] - close[:-1])
+    true_range = np.maximum(tr1[1:], np.maximum(tr2, tr3))
+    true_range = np.concatenate(([tr1[0]], true_range))  # Include the first TR
 
-    atr = np.convolve(tr, np.ones(ATR_LENGTH) / ATR_LENGTH, mode='valid')
+    atr = np.convolve(true_range, np.ones(period) / period, mode='valid')
+    logging.debug(f"True Range: {true_range}, ATR: {atr}")
     return atr
 
-def calculate_rsi(close):
+def calculate_rsi(close, period):
     delta = np.diff(close)
     gain = np.maximum(delta, 0)
     loss = np.maximum(-delta, 0)
-    avg_gain = np.convolve(gain, np.ones(RSI_LENGTH) / RSI_LENGTH, mode='valid')
-    avg_loss = np.convolve(loss, np.ones(RSI_LENGTH) / RSI_LENGTH, mode='valid')
+    avg_gain = np.convolve(gain, np.ones(period) / period, mode='valid')
+    avg_loss = np.convolve(loss, np.ones(period) / period, mode='valid')
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
+    logging.debug(f"RSI: {rsi}")
     return rsi
 
-def calculate_macd(close):
-    ema_fast = np.convolve(close, np.ones(MACD_FAST) / MACD_FAST, mode='valid')
-    ema_slow = np.convolve(close, np.ones(MACD_SLOW) / MACD_SLOW, mode='valid')
+def calculate_macd(close, fast, slow, signal):
+    ema_fast = np.convolve(close, np.ones(fast) / fast, mode='valid')
+    ema_slow = np.convolve(close, np.ones(slow) / slow, mode='valid')
     macd_line = ema_fast[-len(ema_slow):] - ema_slow
-    signal_line = np.convolve(macd_line, np.ones(MACD_SIGNAL) / MACD_SIGNAL, mode='valid')
+    signal_line = np.convolve(macd_line, np.ones(signal) / signal, mode='valid')
+    logging.debug(f"MACD Line: {macd_line}, Signal Line: {signal_line}")
     return macd_line, signal_line
+
+def calculate_trend_direction(close, lower_band, upper_band):
+    trend_direction = np.zeros_like(close)
+    for i in range(1, len(close)):
+        if close[i] > lower_band[i]:
+            trend_direction[i] = 1  # Bullish
+        elif close[i] < upper_band[i]:
+            trend_direction[i] = -1  # Bearish
+        else:
+            trend_direction[i] = trend_direction[i - 1]  # Continue previous trend
+
+    logging.debug(f"Trend Direction: {trend_direction}")
+    return trend_direction
+
+def calculate_bands(high, low, atr, factor):
+    upper_band = np.max(high[-ATR_LENGTH:]) + factor * atr
+    lower_band = np.min(low[-ATR_LENGTH:]) - factor * atr
+    return upper_band, lower_band
 
 # ============== CANDLE PROCESSING ==============
 def process_candle(high, low, close):
@@ -120,37 +141,46 @@ def process_candle(high, low, close):
     close_values.append(close)
 
     if len(high_values) >= ATR_LENGTH:
-        atr = calculate_atr(np.array(high_values), np.array(low_values), np.array(close_values))
-        rsi = calculate_rsi(np.array(close_values))
-        macd_line, signal_line = calculate_macd(np.array(close_values))
+        atr = calculate_atr(np.array(high_values), np.array(low_values), np.array(close_values), ATR_LENGTH)
+        rsi = calculate_rsi(np.array(close_values), RSI_LENGTH)
+        macd_line, signal_line = calculate_macd(np.array(close_values), MACD_FAST, MACD_SLOW, MACD_SIGNAL)
+        upper_band, lower_band = calculate_bands(np.array(high_values), np.array(low_values), atr[-1], ATR_FACTOR)
+        trend_direction = calculate_trend_direction(np.array(close_values), lower_band, upper_band)
 
         latest_values = {
             "ATR": atr[-1],
             "RSI": rsi[-1],
             "MACD Line": macd_line[-1],
             "Signal Line": signal_line[-1],
-            "Position": position,
+            "Trend Direction": trend_direction[-1],
             "Latest Close": close
         }
 
         logging.info(f"Updated ATR: {atr[-1]}")
         logging.info(f"Updated RSI: {rsi[-1]}")
         logging.info(f"Updated MACD Line: {macd_line[-1]}, Signal Line: {signal_line[-1]}")
+        logging.info(f"Updated Trend Direction: {trend_direction[-1]}")
 
-        evaluate_trading_signals(atr, rsi, macd_line, signal_line, close_values[-1])
+        evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, close, upper_band, lower_band)
 
-def evaluate_trading_signals(atr, rsi, macd_line, signal_line, latest_close):
+def evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, latest_close, upper_band, lower_band):
     global position
 
     logging.info("Evaluating trading signals...")
-    if latest_close > atr[-1] and rsi[-1] > 50 and macd_line[-1] > signal_line[-1] and position != "long":
+
+    long_condition = trend_direction[-1] == 1 and rsi[-1] > 50 and macd_line[-1] > signal_line[-1]
+    short_condition = trend_direction[-1] == -1 and rsi[-1] < 50 and macd_line[-1] < signal_line[-1]
+
+    if long_condition and position != "long":
         logging.info("Buy signal detected.")
         position = "long"
         asyncio.create_task(place_order(SIDE_BUY, QTY))
-    elif latest_close < atr[-1] and rsi[-1] < 50 and macd_line[-1] < signal_line[-1] and position != "short":
+
+    elif short_condition and position != "short":
         logging.info("Sell signal detected.")
         position = "short"
         asyncio.create_task(place_order(SIDE_SELL, QTY))
+
     else:
         logging.info("No trade signal detected.")
 
@@ -187,6 +217,7 @@ async def start_binance_websocket():
 
     logging.info("Binance WebSocket initialized. Starting kline socket...")
     async def handle_message(msg):
+        logging.info("Message received from WebSocket.")
         try:
             kline = msg['k']  # Extract kline data
             is_closed = kline['x']  # Check if the candle is closed
@@ -194,7 +225,7 @@ async def start_binance_websocket():
                 high = float(kline['h'])
                 low = float(kline['l'])
                 close = float(kline['c'])
-                logging.info(f"Received closed candle - High: {high}, Low: {low}, Close: {close}")
+                logging.debug(f"Raw Kline Data - High: {high}, Low: {low}, Close: {close}")
                 process_candle(high, low, close)
         except Exception as e:
             logging.error(f"Error while handling WebSocket message: {e}", exc_info=True)
