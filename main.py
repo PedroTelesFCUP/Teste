@@ -244,6 +244,22 @@ async def start_binance_websocket():
         logging.info("Closing WebSocket connection...")
         await client.close_connection()
 
+# ============== MAIN THREADS ==============
+if __name__ == "__main__":
+    # Start Flask app in a separate thread
+    flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
+    flask_thread.daemon = True
+    flask_thread.start()
+    logging.info("Flask monitoring started on port 8080.")
+
+    # Start heartbeat logging in a separate thread
+    hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
+    hb_thread.start()
+    logging.info("Heartbeat logging thread started.")
+
+    # Start asyncio tasks
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_binance_websocket())
 
 
 
