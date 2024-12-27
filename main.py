@@ -326,7 +326,7 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         elif close < final_lb:
             dir_array[i], st_array[i] = -1, final_ub
         else:
-            dir_array[i], st_array[i] = prev_dir, final_lb if prev_dir == 1 else final_ub
+            dir_array[i], st_array[i] = prev_dir, st_array[i-1]
 
     # Optional: Add logging for debugging
     # logging.debug(f"Index {i}: ST={st_array[i]}, Dir={dir_array[i]}, UB={final_ub}, LB={final_lb}")
