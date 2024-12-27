@@ -332,14 +332,12 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         st_array[i] = final_lb
         dir_array[i] = 1
     
-    if prev_dir==1 and close <= final_ub:  # Use current close
+    if close > final_ub:
         dir_array[i] = 1
-    elif prev_dir==-1 and close >= final_lb:
+    elif close < final_lb:
         dir_array[i] = -1
-    elif close > final_ub: 
-        dir_array[i] = 1
     else:
-        dir_array[i]=-1
+        dir_array[i] = prev_dir
 
     if dir_array[i] == 1:
         st_array[i] = final_lb
