@@ -5,6 +5,7 @@ import threading
 import asyncio
 import time
 import numpy as np
+from collections import deque
 from flask import Flask, request, Response, send_file, jsonify
 from binance import AsyncClient, BinanceSocketManager
 from binance.enums import SIDE_BUY, SIDE_SELL
@@ -39,6 +40,12 @@ MACD_SIGNAL = 9
 app = Flask(__name__)
 USERNAME = os.getenv("APP_USERNAME", "admin")
 PASSWORD = os.getenv("APP_PASSWORD", "password")
+
+# Global Variables for Indicators
+high_values = deque(maxlen=100)
+low_values = deque(maxlen=100)
+close_values = deque(maxlen=100)
+position = None
 
 # ============== AUTHENTICATION ==============
 def check_auth(username, password):
@@ -75,7 +82,12 @@ def get_orders():
 
 # ============== INDICATOR CALCULATIONS ==============
 def calculate_atr(high, low, close):
-    tr = np.maximum(high - low, np.maximum(np.abs(high - close[:-1]), np.abs(low - close[:-1])))
+    tr1 = high - low
+    tr2 = np.abs(high[1:] - close[:-1])  # High of current candle minus Close of previous candle
+    tr3 = np.abs(low[1:] - close[:-1])   # Low of current candle minus Close of previous candle
+    tr = np.maximum(tr1[1:], np.maximum(tr2, tr3))  # Take the max of the three TR values
+    tr = np.concatenate(([tr1[0]], tr))  # Include the TR of the first candle
+
     atr = np.convolve(tr, np.ones(ATR_LENGTH) / ATR_LENGTH, mode='valid')
     return atr
 
@@ -96,44 +108,39 @@ def calculate_macd(close):
     signal_line = np.convolve(macd_line, np.ones(MACD_SIGNAL) / MACD_SIGNAL, mode='valid')
     return macd_line, signal_line
 
-# ============== ASYNC SIGNAL CHECKING ==============
-async def check_signals(client):
-    position = None
-    while True:
-        try:
-            logging.info("Fetching market data...")
-            klines = await client.get_klines(symbol=BINANCE_SYMBOL, interval=BINANCE_INTERVAL, limit=100)
-            data = np.array(klines, dtype=float)
-            high = data[:, 2]
-            low = data[:, 3]
-            close = data[:, 4]
+# ============== CANDLE PROCESSING ==============
+def process_candle(high, low, close):
+    global high_values, low_values, close_values, position
 
-            logging.info("Calculating indicators...")
-            atr = calculate_atr(high, low, close)
-            rsi = calculate_rsi(close)
-            macd_line, signal_line = calculate_macd(close)
+    high_values.append(high)
+    low_values.append(low)
+    close_values.append(close)
 
-            # Log the indicator values for debugging
-            logging.info(f"Latest ATR: {atr[-1]}")
-            logging.info(f"Latest RSI: {rsi[-1]}")
-            logging.info(f"Latest MACD Line: {macd_line[-1]}")
-            logging.info(f"Latest Signal Line: {signal_line[-1]}")
+    if len(high_values) >= ATR_LENGTH:
+        atr = calculate_atr(np.array(high_values), np.array(low_values), np.array(close_values))
+        rsi = calculate_rsi(np.array(close_values))
+        macd_line, signal_line = calculate_macd(np.array(close_values))
 
-            logging.info("Checking trading conditions...")
-            if close[-1] > atr[-1] and rsi[-1] > 50 and macd_line[-1] > signal_line[-1] and position != "long":
-                logging.info("Buy signal detected.")
-                await client.order_market_buy(symbol=BINANCE_SYMBOL, quantity=QTY)
-                position = "long"
-            elif close[-1] < atr[-1] and rsi[-1] < 50 and macd_line[-1] < signal_line[-1] and position != "short":
-                logging.info("Sell signal detected.")
-                await client.order_market_sell(symbol=BINANCE_SYMBOL, quantity=QTY)
-                position = "short"
-            else:
-                logging.info("No trade signal detected.")
+        logging.info(f"Updated ATR: {atr[-1]}")
+        logging.info(f"Updated RSI: {rsi[-1]}")
+        logging.info(f"Updated MACD Line: {macd_line[-1]}, Signal Line: {signal_line[-1]}")
 
-            await asyncio.sleep(60)  # Wait for the next candle
-        except Exception as e:
-            logging.error(f"Error in signal checking: {e}", exc_info=True)
+        evaluate_trading_signals(atr, rsi, macd_line, signal_line, close_values[-1])
+
+def evaluate_trading_signals(atr, rsi, macd_line, signal_line, latest_close):
+    global position
+
+    logging.info("Evaluating trading signals...")
+    if latest_close > atr[-1] and rsi[-1] > 50 and macd_line[-1] > signal_line[-1] and position != "long":
+        logging.info("Buy signal detected.")
+        position = "long"
+        # Place a buy order here
+    elif latest_close < atr[-1] and rsi[-1] < 50 and macd_line[-1] < signal_line[-1] and position != "short":
+        logging.info("Sell signal detected.")
+        position = "short"
+        # Place a sell order here
+    else:
+        logging.info("No trade signal detected.")
 
 # ============== BINANCE WEBSOCKET ==============
 async def start_binance_websocket():
@@ -141,10 +148,17 @@ async def start_binance_websocket():
     bsm = BinanceSocketManager(client)
 
     async def handle_message(msg):
-        logging.info(f"WebSocket message received: {msg}")
-        # Process incoming data here
+        kline = msg['k']  # Extract kline data
+        is_closed = kline['x']  # Check if the candle is closed
+        if is_closed:
+            high = float(kline['h'])
+            low = float(kline['l'])
+            close = float(kline['c'])
+            process_candle(high, low, close)
 
-    await bsm.kline_socket(callback=handle_message, symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL)
+    bsm.start_kline_socket(callback=handle_message, symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL)
+    bsm.start()
+    await asyncio.sleep(10**6)  # Keep the WebSocket running
     await client.close_connection()
 
 # ============== MAIN ==============
@@ -157,9 +171,5 @@ if __name__ == "__main__":
 
     # Start asyncio tasks
     loop = asyncio.get_event_loop()
-    client = loop.run_until_complete(AsyncClient.create(BINANCE_API_KEY, BINANCE_SECRET_KEY))
-    loop.run_until_complete(asyncio.gather(
-        check_signals(client),
-        start_binance_websocket()
-    ))
+    loop.run_until_complete(start_binance_websocket())
 
