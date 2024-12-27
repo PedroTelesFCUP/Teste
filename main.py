@@ -159,10 +159,9 @@ async def start_binance_websocket():
     async with bsm.kline_socket(symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL) as stream:
         while True:
             msg = await stream.recv()
-            handle_message(msg)
+            await handle_message(msg)  # Use await to properly call the coroutine
 
     await client.close_connection()
-
 # ============== MAIN ==============
 if __name__ == "__main__":
     # Start Flask app in a separate thread
