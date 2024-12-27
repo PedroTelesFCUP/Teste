@@ -325,26 +325,23 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
 
     # SuperTrend Indicator Calculation
     prev_st = st_array[i-1]
+    prev_dir = dir_array[i-1]
 
     if prev_st is None:
         # Fallback if previous SuperTrend is not set
         st_array[i] = final_lb
         dir_array[i] = 1
-        
-
+    
     if close_array[i] > final_ub:  # Use current close
         st_array[i] = final_lb
         dir_array[i] = 1
-        
-
-    if close_array[i] < final_lb:
+    elif close_array[i] < final_lb:
         st_array[i] = final_ub
         dir_array[i] = -1
-
-else:
-    # Handle unexpected cases by defaulting to bullish
-    st_array[i] = final_lb
-    dir_array[i] = 1
+    else:
+        # Handle unexpected cases by defaulting to bullish
+        st_array[i] = prev_st
+        dir_array[i] = prev_dir
 
     # Optional: Add logging for debugging
     # logging.debug(f"Index {i}: ST={st_array[i]}, Dir={dir_array[i]}, UB={final_ub}, LB={final_lb}")
