@@ -6,7 +6,7 @@ import time
 import numpy as np
 from flask import Flask, request, Response, send_file, jsonify
 from binance.client import Client
-from binance.streams import BinanceSocketManager
+from binance.websocket.spot.websocket_client import SpotWebsocketClient
 from binance.enums import SIDE_BUY, SIDE_SELL
 
 # ============== CONFIGURATION ==============
@@ -166,13 +166,18 @@ def heartbeat_logging():
 
 # ============== BINANCE WEBSOCKET ==============
 def start_binance_websocket():
-    bsm = BinanceSocketManager(client)
     def handle_message(msg):
         logging.info(f"WebSocket message received: {msg}")
-        # Process incoming data here (e.g., trade signals)
-    
-    conn_key = bsm.start_kline_socket(BINANCE_SYMBOL, handle_message, interval=BINANCE_INTERVAL)
-    bsm.start()
+        # Process incoming data here
+
+    ws_client = SpotWebsocketClient()
+    ws_client.start()
+    ws_client.kline(
+        symbol=BINANCE_SYMBOL.lower(),
+        interval=BINANCE_INTERVAL,
+        id=1,
+        callback=handle_message,
+    )
 
 # ============== MAIN ==============
 if __name__ == "__main__":
