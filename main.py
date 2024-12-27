@@ -229,7 +229,21 @@ async def start_binance_websocket():
                 close = float(kline['c'])
                 logging.debug(f"Raw Kline Data - High: {high}, Low: {low}, Close: {close}")
                 process_candle(high, low, close)
-        except Exception as
+        except Exception as e:
+            logging.error(f"Error while handling WebSocket message: {e}", exc_info=True)
+
+    try:
+        async with bsm.kline_socket(symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL) as stream:
+            logging.info(f"Listening for kline data on {BINANCE_SYMBOL} with interval {BINANCE_INTERVAL}.")
+            while True:
+                msg = await stream.recv()
+                await handle_message(msg)
+    except Exception as e:
+        logging.error(f"WebSocket connection error: {e}", exc_info=True)
+    finally:
+        logging.info("Closing WebSocket connection...")
+        await client.close_connection()
+
 
 
 
