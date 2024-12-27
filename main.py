@@ -107,11 +107,20 @@ def calculate_rsi(close, period):
     return rsi
 
 def calculate_macd(close, fast, slow, signal):
+    if len(close) < slow:
+        logging.warning("Not enough data points for MACD calculation.")
+        return np.array([]), np.array([])
+
     ema_fast = np.convolve(close, np.ones(fast) / fast, mode='valid')
     ema_slow = np.convolve(close, np.ones(slow) / slow, mode='valid')
+
+    # Ensure ema_fast and ema_slow align
     macd_line = ema_fast[-len(ema_slow):] - ema_slow
+    if len(macd_line) < signal:
+        logging.warning("Not enough MACD data points for signal line calculation.")
+        return macd_line, np.array([])
+
     signal_line = np.convolve(macd_line, np.ones(signal) / signal, mode='valid')
-    logging.debug(f"MACD Line: {macd_line}, Signal Line: {signal_line}")
     return macd_line, signal_line
 
 def calculate_trend_direction(close, lower_band, upper_band):
@@ -128,8 +137,8 @@ def calculate_trend_direction(close, lower_band, upper_band):
     return trend_direction
 
 def calculate_bands(high, low, atr, factor):
-    upper_band = np.max(high[-ATR_LENGTH:]) + factor * atr
-    lower_band = np.min(low[-ATR_LENGTH:]) - factor * atr
+    upper_band = (high + factor * atr)[-len(high):]
+    lower_band = (low - factor * atr)[-len(low):]
     return upper_band, lower_band
 
 # ============== CANDLE PROCESSING ==============
