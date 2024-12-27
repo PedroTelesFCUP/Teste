@@ -149,36 +149,47 @@ def process_candle(high, low, close):
     low_values.append(low)
     close_values.append(close)
 
-    if len(close_values) < ATR_LENGTH or len(close_values) < max(MACD_SLOW, RSI_LENGTH):
-        logging.warning("Not enough data points for calculations.")
+    # Ensure we have enough data for the longest calculation requirement
+    if len(close_values) < max(ATR_LENGTH, MACD_SLOW, RSI_LENGTH):
+        logging.warning(f"Not enough data points for calculations. Current count: {len(close_values)}")
         return
 
-    atr = calculate_atr(np.array(high_values), np.array(low_values), np.array(close_values), ATR_LENGTH)
-    rsi = calculate_rsi(np.array(close_values), RSI_LENGTH)
-    macd_line, signal_line = calculate_macd(np.array(close_values), MACD_FAST, MACD_SLOW, MACD_SIGNAL)
+    # Calculate indicators
+    try:
+        atr = calculate_atr(np.array(high_values), np.array(low_values), np.array(close_values), ATR_LENGTH)
+        rsi = calculate_rsi(np.array(close_values), RSI_LENGTH)
+        macd_line, signal_line = calculate_macd(np.array(close_values), MACD_FAST, MACD_SLOW, MACD_SIGNAL)
 
-    if len(macd_line) == 0 or len(signal_line) == 0:
-        logging.warning("MACD or Signal Line calculation incomplete. Skipping this candle.")
-        return
+        # Skip if MACD or Signal Line calculations are not ready
+        if len(macd_line) == 0 or len(signal_line) == 0:
+            logging.warning("MACD or Signal Line calculation incomplete. Skipping this candle.")
+            return
 
-    upper_band, lower_band = calculate_bands(np.array(high_values), np.array(low_values), atr[-1], ATR_FACTOR)
-    trend_direction = calculate_trend_direction(np.array(close_values), lower_band, upper_band)
+        # Calculate trend bands
+        upper_band, lower_band = calculate_bands(np.array(high_values), np.array(low_values), atr[-1], ATR_FACTOR)
+        trend_direction = calculate_trend_direction(np.array(close_values), lower_band, upper_band)
 
-    latest_values = {
-        "ATR": atr[-1] if len(atr) > 0 else None,
-        "RSI": rsi[-1] if len(rsi) > 0 else None,
-        "MACD Line": macd_line[-1] if len(macd_line) > 0 else None,
-        "Signal Line": signal_line[-1] if len(signal_line) > 0 else None,
-        "Trend Direction": trend_direction[-1] if len(trend_direction) > 0 else None,
-        "Latest Close": close
-    }
+        # Update the latest indicator values
+        latest_values = {
+            "ATR": atr[-1],
+            "RSI": rsi[-1],
+            "MACD Line": macd_line[-1],
+            "Signal Line": signal_line[-1],
+            "Trend Direction": trend_direction[-1],
+            "Latest Close": close
+        }
 
-    logging.info(f"Updated ATR: {latest_values['ATR']}")
-    logging.info(f"Updated RSI: {latest_values['RSI']}")
-    logging.info(f"Updated MACD Line: {latest_values['MACD Line']}, Signal Line: {latest_values['Signal Line']}")
-    logging.info(f"Updated Trend Direction: {latest_values['Trend Direction']}")
+        # Logging the updated indicator values
+        logging.info(f"Updated ATR: {latest_values['ATR']}")
+        logging.info(f"Updated RSI: {latest_values['RSI']}")
+        logging.info(f"Updated MACD Line: {latest_values['MACD Line']}, Signal Line: {latest_values['Signal Line']}")
+        logging.info(f"Updated Trend Direction: {latest_values['Trend Direction']}")
 
-    evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, close, upper_band, lower_band)
+        # Evaluate trading signals
+        evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, close, upper_band, lower_band)
+
+    except Exception as e:
+        logging.error(f"Error in processing candle: {e}", exc_info=True)
 
 
 def evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, latest_close, upper_band, lower_band):
