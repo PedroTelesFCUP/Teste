@@ -2,11 +2,11 @@ import os
 import sys
 import logging
 import threading
+import asyncio
 import time
 import numpy as np
 from flask import Flask, request, Response, send_file, jsonify
-from binance.client import Client
-from binance.websocket.spot.websocket_client import SpotWebsocketClient
+from binance import AsyncClient, BinanceSocketManager
 from binance.enums import SIDE_BUY, SIDE_SELL
 
 # ============== CONFIGURATION ==============
@@ -23,13 +23,6 @@ logging.basicConfig(
 # Environment variables / credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "YOUR_BINANCE_API_KEY")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "YOUR_BINANCE_SECRET_KEY")
-TESTNET_API_KEY = os.getenv("TESTNET_API_KEY", "YOUR_TESTNET_API_KEY")
-TESTNET_SECRET_KEY = os.getenv("TESTNET_SECRET_KEY", "YOUR_TESTNET_SECRET_KEY")
-
-# Testnet client
-TESTNET_BASE_URL = "https://testnet.binance.vision"
-client = Client(TESTNET_API_KEY, TESTNET_SECRET_KEY, testnet=True)
-client.API_URL = TESTNET_BASE_URL
 
 # Symbol and parameters
 BINANCE_SYMBOL = "BTCUSDT"
@@ -78,23 +71,7 @@ def download_logs():
 
 @app.route("/orders", methods=["GET"])
 def get_orders():
-    try:
-        orders = client.get_all_orders(symbol=BINANCE_SYMBOL)
-        formatted_orders = [
-            {
-                "Order ID": order["orderId"],
-                "Status": order["status"],
-                "Side": order["side"],
-                "Price": order["price"],
-                "Quantity": order["origQty"],
-                "Executed Quantity": order["executedQty"],
-                "Time": order["time"]
-            }
-            for order in orders
-        ]
-        return jsonify(formatted_orders)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"message": "Order fetching is not implemented in this async example."})
 
 # ============== INDICATOR CALCULATIONS ==============
 def calculate_atr(high, low, close):
@@ -119,13 +96,13 @@ def calculate_macd(close):
     signal_line = np.convolve(macd_line, np.ones(MACD_SIGNAL) / MACD_SIGNAL, mode='valid')
     return macd_line, signal_line
 
-# ============== SIGNAL CHECKING ==============
-def check_signals():
+# ============== ASYNC SIGNAL CHECKING ==============
+async def check_signals(client):
     position = None
     while True:
         try:
             logging.info("Fetching market data...")
-            klines = client.get_klines(symbol=BINANCE_SYMBOL, interval=BINANCE_INTERVAL, limit=100)
+            klines = await client.get_klines(symbol=BINANCE_SYMBOL, interval=BINANCE_INTERVAL, limit=100)
             data = np.array(klines, dtype=float)
             high = data[:, 2]
             low = data[:, 3]
@@ -145,39 +122,30 @@ def check_signals():
             logging.info("Checking trading conditions...")
             if close[-1] > atr[-1] and rsi[-1] > 50 and macd_line[-1] > signal_line[-1] and position != "long":
                 logging.info("Buy signal detected.")
-                client.order_market_buy(symbol=BINANCE_SYMBOL, quantity=QTY)
+                await client.order_market_buy(symbol=BINANCE_SYMBOL, quantity=QTY)
                 position = "long"
             elif close[-1] < atr[-1] and rsi[-1] < 50 and macd_line[-1] < signal_line[-1] and position != "short":
                 logging.info("Sell signal detected.")
-                client.order_market_sell(symbol=BINANCE_SYMBOL, quantity=QTY)
+                await client.order_market_sell(symbol=BINANCE_SYMBOL, quantity=QTY)
                 position = "short"
             else:
                 logging.info("No trade signal detected.")
 
-            time.sleep(60)  # Wait for the next candle
+            await asyncio.sleep(60)  # Wait for the next candle
         except Exception as e:
             logging.error(f"Error in signal checking: {e}", exc_info=True)
 
-# ============== HEARTBEAT LOGGING ==============
-def heartbeat_logging():
-    while True:
-        logging.info("Heartbeat: Bot is running...")
-        time.sleep(60)  # Log heartbeat every minute
-
 # ============== BINANCE WEBSOCKET ==============
-def start_binance_websocket():
-    def handle_message(msg):
+async def start_binance_websocket():
+    client = await AsyncClient.create(BINANCE_API_KEY, BINANCE_SECRET_KEY)
+    bsm = BinanceSocketManager(client)
+
+    async def handle_message(msg):
         logging.info(f"WebSocket message received: {msg}")
         # Process incoming data here
 
-    ws_client = SpotWebsocketClient()
-    ws_client.start()
-    ws_client.kline(
-        symbol=BINANCE_SYMBOL.lower(),
-        interval=BINANCE_INTERVAL,
-        id=1,
-        callback=handle_message,
-    )
+    await bsm.kline_socket(callback=handle_message, symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL)
+    await client.close_connection()
 
 # ============== MAIN ==============
 if __name__ == "__main__":
@@ -187,20 +155,11 @@ if __name__ == "__main__":
     flask_thread.start()
     logging.info("Flask monitoring started on port 8080.")
 
-    # Start the heartbeat logging thread
-    hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
-    hb_thread.start()
-    logging.info("Heartbeat logging thread started.")
-
-    # Start signals checking thread
-    signal_thread = threading.Thread(target=check_signals, daemon=True)
-    signal_thread.start()
-    logging.info("Signal checking thread started.")
-
-    # Start Binance WebSocket
-    try:
+    # Start asyncio tasks
+    loop = asyncio.get_event_loop()
+    client = loop.run_until_complete(AsyncClient.create(BINANCE_API_KEY, BINANCE_SECRET_KEY))
+    loop.run_until_complete(asyncio.gather(
+        check_signals(client),
         start_binance_websocket()
-    except Exception as e:
-        logging.error(f"Binance WebSocket error: {e}", exc_info=True)
-        sys.exit(1)
+    ))
 
