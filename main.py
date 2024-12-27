@@ -46,6 +46,7 @@ high_values = deque(maxlen=100)
 low_values = deque(maxlen=100)
 close_values = deque(maxlen=100)
 position = None
+latest_values = {"ATR": None, "RSI": None, "MACD Line": None, "Signal Line": None, "Position": None, "Latest Close": None}
 
 # ============== AUTHENTICATION ==============
 def check_auth(username, password):
@@ -110,7 +111,7 @@ def calculate_macd(close):
 
 # ============== CANDLE PROCESSING ==============
 def process_candle(high, low, close):
-    global high_values, low_values, close_values, position
+    global high_values, low_values, close_values, position, latest_values
 
     high_values.append(high)
     low_values.append(low)
@@ -120,6 +121,15 @@ def process_candle(high, low, close):
         atr = calculate_atr(np.array(high_values), np.array(low_values), np.array(close_values))
         rsi = calculate_rsi(np.array(close_values))
         macd_line, signal_line = calculate_macd(np.array(close_values))
+
+        latest_values = {
+            "ATR": atr[-1],
+            "RSI": rsi[-1],
+            "MACD Line": macd_line[-1],
+            "Signal Line": signal_line[-1],
+            "Position": position,
+            "Latest Close": close
+        }
 
         logging.info(f"Updated ATR: {atr[-1]}")
         logging.info(f"Updated RSI: {rsi[-1]}")
@@ -142,26 +152,48 @@ def evaluate_trading_signals(atr, rsi, macd_line, signal_line, latest_close):
     else:
         logging.info("No trade signal detected.")
 
+# ============== HEARTBEAT LOGGING ==============
+def heartbeat_logging():
+    global latest_values
+    while True:
+        logging.info(f"Heartbeat - Latest Values: {latest_values}")
+        if latest_values["Position"]:
+            logging.info(f"Current Position: {latest_values['Position']} - Latest Close: {latest_values['Latest Close']}")
+        time.sleep(60)  # Log every 60 seconds
+
 # ============== BINANCE WEBSOCKET ==============
 async def start_binance_websocket():
+    logging.info("Initializing Binance WebSocket...")
     client = await AsyncClient.create(BINANCE_API_KEY, BINANCE_SECRET_KEY)
     bsm = BinanceSocketManager(client)
 
+    logging.info("Binance WebSocket initialized. Starting kline socket...")
     async def handle_message(msg):
-        kline = msg['k']  # Extract kline data
-        is_closed = kline['x']  # Check if the candle is closed
-        if is_closed:
-            high = float(kline['h'])
-            low = float(kline['l'])
-            close = float(kline['c'])
-            process_candle(high, low, close)
+        logging.info("Message received from WebSocket.")
+        try:
+            kline = msg['k']  # Extract kline data
+            is_closed = kline['x']  # Check if the candle is closed
+            if is_closed:
+                high = float(kline['h'])
+                low = float(kline['l'])
+                close = float(kline['c'])
+                logging.info(f"Received closed candle - High: {high}, Low: {low}, Close: {close}")
+                process_candle(high, low, close)
+        except Exception as e:
+            logging.error(f"Error while handling WebSocket message: {e}", exc_info=True)
 
-    async with bsm.kline_socket(symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL) as stream:
-        while True:
-            msg = await stream.recv()
-            await handle_message(msg)  # Use await to properly call the coroutine
+    try:
+        async with bsm.kline_socket(symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL) as stream:
+            logging.info(f"Listening for kline data on {BINANCE_SYMBOL} with interval {BINANCE_INTERVAL}.")
+            while True:
+                msg = await stream.recv()
+                await handle_message(msg)
+    except Exception as e:
+        logging.error(f"WebSocket connection error: {e}", exc_info=True)
+    finally:
+        logging.info("Closing WebSocket connection...")
+        await client.close_connection()
 
-    await client.close_connection()
 # ============== MAIN ==============
 if __name__ == "__main__":
     # Start Flask app in a separate thread
@@ -169,6 +201,11 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
     logging.info("Flask monitoring started on port 8080.")
+
+    # Start heartbeat logging in a separate thread
+    hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
+    hb_thread.start()
+    logging.info("Heartbeat logging thread started.")
 
     # Start asyncio tasks
     loop = asyncio.get_event_loop()
