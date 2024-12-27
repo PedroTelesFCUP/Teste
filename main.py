@@ -330,14 +330,14 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
         # Fallback if previous SuperTrend is not set
         st_array[i] = final_lb
         dir_array[i] = 1
-    elif prev_st == prev_ub:
+    elif prev_st == final_ub:
         if close_array[i] < final_ub:
             st_array[i] = final_ub
             dir_array[i] = -1
         else:
             st_array[i] = final_lb
             dir_array[i] = 1
-    elif prev_st == prev_lb:
+    elif prev_st == final_lb:
         if close_array[i] > final_lb:
             st_array[i] = final_lb
             dir_array[i] = 1
