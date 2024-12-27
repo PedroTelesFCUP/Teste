@@ -24,6 +24,8 @@ logging.basicConfig(
 # Environment variables / credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "YOUR_BINANCE_API_KEY")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "YOUR_BINANCE_SECRET_KEY")
+TESTNET_API_KEY = os.getenv("TESTNET_API_KEY", "YOUR_TESTNET_API_KEY")
+TESTNET_SECRET_KEY = os.getenv("TESTNET_SECRET_KEY", "YOUR_TESTNET_SECRET_KEY")
 
 # Symbol and parameters
 BINANCE_SYMBOL = "BTCUSDT"
@@ -144,13 +146,29 @@ def evaluate_trading_signals(atr, rsi, macd_line, signal_line, latest_close):
     if latest_close > atr[-1] and rsi[-1] > 50 and macd_line[-1] > signal_line[-1] and position != "long":
         logging.info("Buy signal detected.")
         position = "long"
-        # Place a buy order here
+        asyncio.create_task(place_order(SIDE_BUY, QTY))
     elif latest_close < atr[-1] and rsi[-1] < 50 and macd_line[-1] < signal_line[-1] and position != "short":
         logging.info("Sell signal detected.")
         position = "short"
-        # Place a sell order here
+        asyncio.create_task(place_order(SIDE_SELL, QTY))
     else:
         logging.info("No trade signal detected.")
+
+async def place_order(side, quantity):
+    client = await AsyncClient.create(TESTNET_API_KEY, TESTNET_SECRET_KEY, testnet=True)
+    try:
+        logging.info(f"Placing {side} order for {quantity} {BINANCE_SYMBOL}...")
+        order = await client.create_order(
+            symbol=BINANCE_SYMBOL,
+            side=side,
+            type="MARKET",
+            quantity=quantity
+        )
+        logging.info(f"Order successful: {order}")
+    except Exception as e:
+        logging.error(f"Error placing order: {e}", exc_info=True)
+    finally:
+        await client.close_connection()
 
 # ============== HEARTBEAT LOGGING ==============
 def heartbeat_logging():
@@ -164,7 +182,7 @@ def heartbeat_logging():
 # ============== BINANCE WEBSOCKET ==============
 async def start_binance_websocket():
     logging.info("Initializing Binance WebSocket...")
-    client = await AsyncClient.create(BINANCE_API_KEY, BINANCE_SECRET_KEY)
+    client = await AsyncClient.create(TESTNET_API_KEY, TESTNET_SECRET_KEY, testnet=True)
     bsm = BinanceSocketManager(client)
 
     logging.info("Binance WebSocket initialized. Starting kline socket...")
@@ -209,4 +227,5 @@ if __name__ == "__main__":
     # Start asyncio tasks
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_binance_websocket())
+
 
