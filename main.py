@@ -268,108 +268,53 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         logging.error(f"K-Means clustering failed: {e}", exc_info=True)
         return None, None, None, 0, 0, 0
 
-import logging
 
 def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array, high_array, low_array, close_array):
     """
     Compute the SuperTrend indicator for a given index.
-
-    Parameters:
-    - i (int): Current index in the data arrays.
-    - factor (float): Multiplier for ATR to determine the band distance.
-    - assigned_atr (float or None): ATR value at the current index. If None, carry forward previous values.
-    - st_array (list of float): List to store SuperTrend values.
-    - dir_array (list of int): List to store direction values (1 for bullish, -1 for bearish).
-    - ub_array (list of float): List to store upper band values.
-    - lb_array (list of float): List to store lower band values.
-    - high_array (list of float): List of high prices.
-    - low_array (list of float): List of low prices.
-    - close_array (list of float): List of close prices.
-
-    Returns:
-    - None: Updates the st_array, dir_array, ub_array, and lb_array in place.
     """
 
     # Handle cases where ATR is not available
     if assigned_atr is None:
         if i > 0:
-            st_array[i] = st_array[i-1]
-            dir_array[i] = dir_array[i-1]
-            ub_array[i] = ub_array[i-1]
-            lb_array[i] = lb_array[i-1]
+            st_array[i], dir_array[i], ub_array[i], lb_array[i] = st_array[i-1], dir_array[i-1], ub_array[i-1], lb_array[i-1]
         else:
-            st_array[i] = None
-            dir_array[i] = 1  # Default to bullish
-            ub_array[i] = None
-            lb_array[i] = None
+            st_array[i], dir_array[i], ub_array[i], lb_array[i] = None, 1, None, None
         return
 
-    # Calculate HL2 (Average of High and Low)
+    # Calculate basic bands
     hl2 = (high_array[i] + low_array[i]) / 2.0
-    upBand = hl2 + factor * assigned_atr
-    downBand = hl2 - factor * assigned_atr
+    basic_ub = hl2 + factor * assigned_atr
+    basic_lb = hl2 - factor * assigned_atr
 
     if i == 0:
-        # Initialize the first SuperTrend value
-        dir_array[i] = 1  # Assuming initial trend is bullish
-        ub_array[i] = upBand
-        lb_array[i] = downBand
-        st_array[i] = downBand  # Start with the lower band for bullish
-        logging.debug(f"Initial SuperTrend at index {i}: dir=1, st={st_array[i]}, ub={ub_array[i]}, lb={lb_array[i]}")
+        # Initialize for the first index
+        ub_array[i], lb_array[i] = basic_ub, basic_lb
+        st_array[i] = basic_lb  # Assume initial trend is bullish
+        dir_array[i] = 1
         return
 
-    # Retrieve previous SuperTrend and direction
-    prevST = st_array[i-1]
-    prevDir = dir_array[i-1]
-    prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
-    prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
+    # Final bands logic for i > 0
+    prev_ub, prev_lb, prev_close = ub_array[i-1], lb_array[i-1], close_array[i-1]
+    final_ub = basic_ub if basic_ub < prev_ub or prev_close > prev_ub else prev_ub
+    final_lb = basic_lb if basic_lb > prev_lb or prev_close < prev_lb else prev_lb
 
-    # **Band Continuity Logic**
-    # Calculate Final Lower Band
-    if (downBand > prevLB) or (close_array[i-1] < prevLB):
-        finalDownBand = downBand
-    else:
-        finalDownBand = prevLB
+    ub_array[i], lb_array[i] = final_ub, final_lb
 
-    # Calculate Final Upper Band
-    if (upBand < prevUB) or (close_array[i-1] > prevUB):
-        finalUpBand = upBand
-    else:
-        finalUpBand = prevUB
-
-    # Update Upper and Lower Bands
-    ub_array[i] = finalUpBand
-    lb_array[i] = finalDownBand
-
-    # **Direction Logic**
-    # Determine if the previous SuperTrend was the upper band (bearish) or lower band (bullish)
-    wasUpper = (prevST == prevUB)
-
-    if wasUpper:
-        # Previous trend was bearish
-        if close_array[i] > finalUpBand:
-            # Price has crossed above the upper band -> switch to bullish
-            dir_array[i] = 1
-            st_array[i] = finalDownBand
-            logging.info(f"Direction change at index {i}: Bearish to Bullish")
+    # SuperTrend logic
+    prev_st = st_array[i-1]
+    if prev_st == prev_ub:
+        if close_array[i] < final_ub:
+            st_array[i], dir_array[i] = final_ub, -1
         else:
-            # Continue bearish trend
-            dir_array[i] = -1
-            st_array[i] = finalUpBand
-    else:
-        # Previous trend was bullish
-        if close_array[i] < finalDownBand:
-            # Price has crossed below the lower band -> switch to bearish
-            dir_array[i] = -1
-            st_array[i] = finalUpBand
-            logging.info(f"Direction change at index {i}: Bullish to Bearish")
+            st_array[i], dir_array[i] = final_lb, 1
+    elif prev_st == prev_lb:
+        if close_array[i] > final_lb:
+            st_array[i], dir_array[i] = final_lb, 1
         else:
-            # Continue bullish trend
-            dir_array[i] = 1
-            st_array[i] = finalDownBand
+            st_array[i], dir_array[i] = final_ub, -1
 
-    # **Logging SuperTrend Values**
-    logging.debug(f"SuperTrend at index {i}: dir={dir_array[i]}, st={st_array[i]}, ub={ub_array[i]}, lb={lb_array[i]}")
+
 
     
 
