@@ -278,9 +278,15 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
     # Handle cases where ATR is not available
     if assigned_atr is None:
         if i > 0:
-            st_array[i], dir_array[i], ub_array[i], lb_array[i] = st_array[i-1], dir_array[i-1], ub_array[i-1], lb_array[i-1]
+            st_array[i] = st_array[i-1]
+            dir_array[i] = dir_array[i-1]
+            ub_array[i] = ub_array[i-1]
+            lb_array[i] = lb_array[i-1]
         else:
-            st_array[i], dir_array[i], ub_array[i], lb_array[i] = None, 1, None, None
+            st_array[i] = None
+            dir_array[i] = 1  # Default to bullish
+            ub_array[i] = None
+            lb_array[i] = None
         return
 
     # Calculate basic bands
@@ -290,34 +296,61 @@ def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, l
 
     if i == 0:
         # Initialize for the first index
-        ub_array[i], lb_array[i] = basic_ub, basic_lb
+        ub_array[i] = basic_ub
+        lb_array[i] = basic_lb
         st_array[i] = basic_lb  # Assume initial trend is bullish
         dir_array[i] = 1
         return
 
-    # Final bands logic for i > 0
-    prev_ub, prev_lb, prev_close = ub_array[i-1], lb_array[i-1], close_array[i-1]
-    final_ub = basic_ub if basic_ub < prev_ub or prev_close > prev_ub else prev_ub
-    final_lb = basic_lb if basic_lb > prev_lb or prev_close < prev_lb else prev_lb
+    # Retrieve previous bands and close
+    prev_ub = ub_array[i-1] if ub_array[i-1] is not None else basic_ub
+    prev_lb = lb_array[i-1] if lb_array[i-1] is not None else basic_lb
+    prev_close = close_array[i-1]
 
-    ub_array[i], lb_array[i] = final_ub, final_lb
+    # Final Upper Band Calculation
+    if basic_ub < prev_ub or prev_close > prev_ub:
+        final_ub = basic_ub
+    else:
+        final_ub = prev_ub
 
-    # SuperTrend logic
+    # Final Lower Band Calculation
+    if basic_lb > prev_lb or prev_close < prev_lb:
+        final_lb = basic_lb
+    else:
+        final_lb = prev_lb
+
+    # Update bands
+    ub_array[i] = final_ub
+    lb_array[i] = final_lb
+
+    # SuperTrend Indicator Calculation
     prev_st = st_array[i-1]
-    if prev_st == prev_ub:
+
+    if prev_st is None:
+        # Fallback if previous SuperTrend is not set
+        st_array[i] = final_lb
+        dir_array[i] = 1
+    elif prev_st == prev_ub:
         if close_array[i] < final_ub:
-            st_array[i], dir_array[i] = final_ub, -1
+            st_array[i] = final_ub
+            dir_array[i] = -1
         else:
-            st_array[i], dir_array[i] = final_lb, 1
+            st_array[i] = final_lb
+            dir_array[i] = 1
     elif prev_st == prev_lb:
         if close_array[i] > final_lb:
-            st_array[i], dir_array[i] = final_lb, 1
+            st_array[i] = final_lb
+            dir_array[i] = 1
         else:
-            st_array[i], dir_array[i] = final_ub, -1
+            st_array[i] = final_ub
+            dir_array[i] = -1
+    else:
+        # Handle unexpected cases by defaulting to bullish
+        st_array[i] = final_lb
+        dir_array[i] = 1
 
-
-
-    
+    # Optional: Add logging for debugging
+    # logging.debug(f"Index {i}: ST={st_array[i]}, Dir={dir_array[i]}, UB={final_ub}, LB={final_lb}")
 
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
