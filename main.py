@@ -656,7 +656,7 @@ def on_message_candle(msg):
             compute_supertrend(
                 i, SECONDARY_FACTOR, assigned_centroid,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
+                secondary_upperBand, secondary_lowerBand,
                 high_array,low_array, close_array
             )
         else:
