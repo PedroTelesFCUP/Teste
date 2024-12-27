@@ -664,12 +664,14 @@ def on_message_candle(msg):
             compute_supertrend(
                 i, PRIMARY_FACTOR, None,
                 primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand
+                primary_upperBand, primary_lowerBand,
+                high_array,low_array, close_array
             )
             compute_supertrend(
                 i, SECONDARY_FACTOR, None,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand
+                secondary_upperBand, secondary_lowerBand,
+                high_array,low_array, close_array
             )
             
 
