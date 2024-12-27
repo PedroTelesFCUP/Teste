@@ -205,8 +205,10 @@ def heartbeat_logging():
     global latest_values
     while True:
         logging.info(f"Heartbeat - Latest Values: {latest_values}")
-        if latest_values["Position"]:
+        if latest_values.get("Position"):
             logging.info(f"Current Position: {latest_values['Position']} - Latest Close: {latest_values['Latest Close']}")
+        else:
+            logging.info("Position is None or not set yet.")
         time.sleep(60)  # Log every 60 seconds
 
 # ============== BINANCE WEBSOCKET ==============
@@ -217,6 +219,7 @@ async def start_binance_websocket():
 
     logging.info("Binance WebSocket initialized. Starting kline socket...")
     async def handle_message(msg):
+        logging.info("Message received from WebSocket.")
         try:
             kline = msg['k']  # Extract kline data
             is_closed = kline['x']  # Check if the candle is closed
@@ -226,36 +229,7 @@ async def start_binance_websocket():
                 close = float(kline['c'])
                 logging.debug(f"Raw Kline Data - High: {high}, Low: {low}, Close: {close}")
                 process_candle(high, low, close)
-        except Exception as e:
-            logging.error(f"Error while handling WebSocket message: {e}", exc_info=True)
+        except Exception as
 
-    try:
-        async with bsm.kline_socket(symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL) as stream:
-            logging.info(f"Listening for kline data on {BINANCE_SYMBOL} with interval {BINANCE_INTERVAL}.")
-            while True:
-                msg = await stream.recv()
-                await handle_message(msg)
-    except Exception as e:
-        logging.error(f"WebSocket connection error: {e}", exc_info=True)
-    finally:
-        logging.info("Closing WebSocket connection...")
-        await client.close_connection()
-
-# ============== MAIN ==============
-if __name__ == "__main__":
-    # Start Flask app in a separate thread
-    flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
-    flask_thread.daemon = True
-    flask_thread.start()
-    logging.info("Flask monitoring started on port 8080.")
-
-    # Start heartbeat logging in a separate thread
-    hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
-    hb_thread.start()
-    logging.info("Heartbeat logging thread started.")
-
-    # Start asyncio tasks
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_binance_websocket())
 
 
