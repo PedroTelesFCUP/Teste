@@ -217,7 +217,6 @@ async def start_binance_websocket():
 
     logging.info("Binance WebSocket initialized. Starting kline socket...")
     async def handle_message(msg):
-        logging.info("Message received from WebSocket.")
         try:
             kline = msg['k']  # Extract kline data
             is_closed = kline['x']  # Check if the candle is closed
