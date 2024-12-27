@@ -269,62 +269,80 @@ def run_kmeans(vol_data, hv_init, mv_init, lv_init):
         logging.error(f"K-Means clustering failed: {e}", exc_info=True)
         return None, None, None, 0, 0, 0
 
-
-def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array, high_array, low_array, close_array):
-    """
-    Compute the SuperTrend indicator for a given index.
-    """
-    if assigned_atr is None or assigned_atr == 0:
-        # Handle missing or zero ATR
-        if i > 0:
-            st_array[i] = st_array[i - 1]
-            dir_array[i] = dir_array[i - 1]
-            ub_array[i] = ub_array[i - 1]
-            lb_array[i] = lb_array[i - 1]
+def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
+    if assigned_atr is None:
+        # Carry forward previous values
+        st_array[i] = st_array[i-1] if i > 0 else None
+        dir_array[i] = dir_array[i-1] if i > 0 else 1
+        ub_array[i] = ub_array[i-1] if i > 0 else None
+        lb_array[i] = lb_array[i-1] if i > 0 else None
         return
 
-    # Calculate basic bands
     hl2 = (high_array[i] + low_array[i]) / 2.0
-    basic_ub = hl2 + factor * assigned_atr
-    basic_lb = hl2 - factor * assigned_atr
+    upBand = hl2 + factor * assigned_atr
+    downBand = hl2 - factor * assigned_atr
 
     if i == 0:
-        # Initialize for the first index
-        ub_array[i] = basic_ub
-        lb_array[i] = basic_lb
-        if close_array[i] > hl2:
-            st_array[i], dir_array[i] = basic_ub, -1  # Bearish trend
-        else:
-            st_array[i], dir_array[i] = basic_lb, 1  # Bullish trend
+        dir_array[i] = 1
+        ub_array[i] = upBand
+        lb_array[i] = downBand
+        st_array[i] = downBand
+        logging.debug(f"Initial supertrend at index {i}: dir=1, st={upBand}, ub={upBand}, lb={downBand}")
         return
 
-    # Retrieve previous bands and close
-    prev_ub = ub_array[i - 1] if ub_array[i - 1] is not None else basic_ub
-    prev_lb = lb_array[i - 1] if lb_array[i - 1] is not None else basic_lb
-    close = close_array[i]
 
-    # Final Upper and Lower Band Calculations
-    final_ub = min(basic_ub, prev_ub) if close <= prev_ub else basic_ub
-    final_lb = max(basic_lb, prev_lb) if close >= prev_lb else basic_lb
+    prevST = st_array[i-1]
+    prevDir = dir_array[i-1]
+    prevUB = ub_array[i-1] if ub_array[i-1] is not None else upBand
+    prevLB = lb_array[i-1] if lb_array[i-1] is not None else downBand
 
-    # Update bands
-    ub_array[i], lb_array[i] = final_ub, final_lb
 
-    # Determine trend direction and SuperTrend value
-    prev_st, prev_dir = st_array[i - 1], dir_array[i - 1]
-    if prev_st is None:
-        st_array[i] = final_lb if close <= hl2 else final_ub
-        dir_array[i] = 1 if close <= hl2 else -1
+    # Pine band continuity
+    # lowerBand = lowerBand > prevLB or close[i-1]<prevLB ? lowerBand : prevLB
+    if (downBand > prevLB or close_array[i-1]<prevLB):
+        downBand = downBand
     else:
-        if close > final_ub:
-            dir_array[i], st_array[i] = 1, final_lb
-        elif close < final_lb:
-            dir_array[i], st_array[i] = -1, final_ub
-        else:
-            dir_array[i], st_array[i] = prev_dir, st_array[i-1]
+        downBand = prevLB
 
-    # Optional: Add logging for debugging
-    # logging.debug(f"Index {i}: ST={st_array[i]}, Dir={dir_array[i]}, UB={final_ub}, LB={final_lb}")
+    # upperBand = upperBand < prevUB or close[i-1]>prevUB ? upperBand : prevUB
+    if (upBand < prevUB or close_array[i-1]>prevUB):
+        upBand = upBand
+    else:
+        upBand = prevUB
+
+    # direction logic
+    # if na(atr[1]) => direction=1 (handled on i=0)
+    # else if prevSuperTrend==prevUpperBand => direction= close>upperBand ? -1 : 1
+    # else => direction= close<lowerBand ? 1 : -1
+    # But in Pine, we check if prevST was the upperBand or lowerBand:
+    # If direction was -1 => previous ST was lowerBand, else upperBand
+    
+    wasUpper = (prevDir == -1)  # If direction = -1 => ST was upperBand
+    
+    if wasUpper:
+        # direction = -1 if close<Band else -1
+        if close_array[i] > upBand:
+            dir_array[i] = 1
+            logging.info(f"Direction change!! Bearish to Bullish")
+        else:
+            dir_array[i] = -1
+    else:
+        # direction = -1 if close>downBand else 1
+        if close_array[i] < downBand:
+            dir_array[i] = -1
+            logging.info(f"Direction change!! Bullish to Bearish")
+        else:
+            dir_array[i] = 1
+
+    # superTrend = direction == -1 ? lowerBand : upperBand
+    if dir_array[i] == -1:
+        st_array[i] = upBand
+    else:
+        st_array[i] = downBand
+
+    ub_array[i] = upBand
+    lb_array[i] = downBand
+    
 
 
 # ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
@@ -604,28 +622,24 @@ def on_message_candle(msg):
             compute_supertrend(
                 i, PRIMARY_FACTOR, assigned_centroid,
                 primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand, 
-                high_array,low_array, close_array
+                primary_upperBand, primary_lowerBand 
             )
             compute_supertrend(
                 i, SECONDARY_FACTOR, assigned_centroid,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand,
-                high_array,low_array, close_array
+                secondary_upperBand, secondary_lowerBand
             )
         else:
             # Assign default SuperTrend values if centroid is None
             compute_supertrend(
                 i, PRIMARY_FACTOR, None,
                 primary_supertrend, primary_direction,
-                primary_upperBand, primary_lowerBand,
-                high_array,low_array, close_array
+                primary_upperBand, primary_lowerBand
             )
             compute_supertrend(
                 i, SECONDARY_FACTOR, None,
                 secondary_supertrend, secondary_direction,
-                secondary_upperBand, secondary_lowerBand,
-                high_array,low_array, close_array
+                secondary_upperBand, secondary_lowerBand
             )
             
 
