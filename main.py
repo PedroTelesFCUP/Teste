@@ -1,14 +1,18 @@
 import os
 import sys
+import time
+import math
+import statistics
 import logging
 import threading
-import asyncio
-import time
-import numpy as np
-from collections import deque
-from flask import Flask, request, Response, send_file, jsonify
-from binance import AsyncClient, BinanceSocketManager
-from binance.enums import SIDE_BUY, SIDE_SELL
+import pandas as pd
+from flask import Flask, send_file, jsonify, request, Response
+# 3rd-party libraries
+from binance import ThreadedWebsocketManager
+from binance.client import Client
+# from alpaca_trade_api import REST as AlpacaREST
+# from sklearn.cluster import KMeans
+# import numpy as np
 
 # ============== CONFIGURATION ==============
 LOG_LEVEL = logging.INFO
@@ -17,44 +21,104 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("bot_logs.log"),  # Save logs to file
-        logging.StreamHandler(sys.stdout)    # Output logs to console
+        logging.StreamHandler(sys.stdout)     # Output logs to console
     ]
 )
 
 # Environment variables / credentials
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "YOUR_BINANCE_API_KEY")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "YOUR_BINANCE_SECRET_KEY")
-TESTNET_API_KEY = os.getenv("TESTNET_API_KEY", "YOUR_TESTNET_API_KEY")
-TESTNET_SECRET_KEY = os.getenv("TESTNET_SECRET_KEY", "YOUR_TESTNET_SECRET_KEY")
+TESTNET_API_KEY = os.getenv("TESTNET_API_KEY", "YOUR_TEST_API_KEY")
+TESTNET_SECRET_KEY = os.getenv("TESTNET_SECRET_KEY", "YOUR_TEST_SECRET_KEY")
+# ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "YOUR_ALPACA_API_KEY")
+# ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "YOUR_ALPACA_SECRET_KEY")
 
-# Symbol and parameters
+# Alpaca endpoints
+# ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # paper trading
+TESTNET_BASE_URL = "https://testnet.binance.vision"  # paper trading
+SYMBOL_TESTNET = "BTCUSDT"  # e.g. "BTCUSD" on Alpaca
+QTY = 0.001               # Example trade size
+
+# Binance symbol & timeframe
 BINANCE_SYMBOL = "BTCUSDT"
-BINANCE_INTERVAL = "1m"  # 1-minute candles
-QTY = 0.001  # Trade size
-ATR_LENGTH = 14
-ATR_FACTOR = 2.0
-RSI_LENGTH = 14
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
+BINANCE_INTERVAL = "1s"  # or "1m", etc.
 
-# Flask server
+# Strategy / logic parameters
+ATR_LEN = 15
+PRIMARY_FACTOR = 8.0      # SuperTrend factor for primary
+SECONDARY_FACTOR = 3.0    # SuperTrend factor for secondary
+TRAINING_DATA_PERIOD = 100  
+HIGHVOL_PERCENTILE = 0.75
+MIDVOL_PERCENTILE = 0.5
+LOWVOL_PERCENTILE = 0.25
+
+# Heartbeat intervals
+HEARTBEAT_INTERVAL = 1   # seconds
+SIGNAL_CHECK_INTERVAL = 1 # check signals every 1 second
+
+# Keep only the last MAX_CANDLES in memory
+MAX_CANDLES = 200
+
+# Number of candles to determine pullback pattern
+MAX_PULLBACK_CANDLES = 30
+MIN_PULLBACK_CANDLES = 4
+
+# only once?
+CLUSTER_RUN_ONCE = False       # If True, run K-Means only once after we have the training period data
+
+# ============== BINANCE  & BINANCE SPOT TEST CLIENTS ==============
+testnet_api = Client(api_key=TESTNET_API_KEY, api_secret=TESTNET_SECRET_KEY)
+testnet_api.API_URL = TESTNET_BASE_URL
+binance_client = Client(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+
+# ============== GLOBAL DATA STRUCTURES ==============
+time_array = []
+high_array = []
+low_array = []
+close_array = []
+atr_array = []
+cluster_assignments = []
+
+# K-Means centroids for High/Medium/Low once stable
+hv_new = None
+mv_new = None
+lv_new = None
+
+# Two signals
+primary_supertrend = []
+primary_direction = []
+primary_upperBand = []
+primary_lowerBand = []
+
+secondary_supertrend = []
+secondary_direction = []
+secondary_upperBand = []
+secondary_lowerBand = []
+
+# Keep track of secondary directions to detect patterns
+last_secondary_directions = []
+
+# Position management
+in_position = False    # True if in a trade
+position_side = None   # 'long' or 'short'
+entry_price = None
+
+# For logging
+last_heartbeat_time = 0
+
+#======= FLASKING =======
+# Flask Server
 app = Flask(__name__)
-USERNAME = os.getenv("APP_USERNAME", "admin")
-PASSWORD = os.getenv("APP_PASSWORD", "password")
 
-# Global Variables for Indicators
-high_values = deque(maxlen=100)
-low_values = deque(maxlen=100)
-close_values = deque(maxlen=100)
-position = None
-latest_values = {"ATR": None, "RSI": None, "MACD Line": None, "Signal Line": None, "Trend Direction": None, "Latest Close": None}
+USERNAME = os.getenv("APP_USERNAME", "admin")  # Default username
+PASSWORD = os.getenv("APP_PASSWORD", "password")  # Default password
 
-# ============== AUTHENTICATION ==============
 def check_auth(username, password):
+    """Validate the username and password."""
     return username == USERNAME and password == PASSWORD
 
 def authenticate():
+    """Send a 401 response that enables basic authentication."""
     return Response(
         "Could not verify your access level for that URL.\n"
         "You have to login with proper credentials", 401,
@@ -63,11 +127,11 @@ def authenticate():
 
 @app.before_request
 def require_auth():
+    """Require authentication for every request."""
     auth = request.authorization
     if not auth or not check_auth(auth.username, auth.password):
         return authenticate()
 
-# ============== FLASK ROUTES ==============
 @app.route("/")
 def home():
     return "Bot is running!", 200
@@ -75,219 +139,550 @@ def home():
 @app.route('/logs')
 def download_logs():
     try:
+        # Assuming logs are stored in the current directory
         return send_file("bot_logs.log", as_attachment=True)
     except FileNotFoundError:
         return "Log file not found.", 404
 
 @app.route("/orders", methods=["GET"])
 def get_orders():
-    return jsonify({"message": "Order fetching is not implemented in this async example."})
+    try:
+        # Fetch all orders for a specific symbol
+        symbol = "BTCUSDT"  # Replace with the trading pair you use
+        orders = testnet_api.get_all_orders(symbol=symbol)
 
-# ============== INDICATOR CALCULATIONS ==============
-def calculate_atr(high, low, close, period):
-    tr1 = high - low
-    tr2 = np.abs(high[1:] - close[:-1])
-    tr3 = np.abs(low[1:] - close[:-1])
-    true_range = np.maximum(tr1[1:], np.maximum(tr2, tr3))
-    true_range = np.concatenate(([tr1[0]], true_range))  # Include the first TR
+        # Format the orders into a readable structure
+        formatted_orders = [
+            {
+                "Order ID": order["orderId"],
+                "Status": order["status"],
+                "Side": order["side"],
+                "Price": order["price"],
+                "Quantity": order["origQty"],
+                "Executed Quantity": order["executedQty"],
+                "Time": order["time"]
+            }
+            for order in orders
+        ]
 
-    atr = np.convolve(true_range, np.ones(period) / period, mode='valid')
-    logging.debug(f"True Range: {true_range}, ATR: {atr}")
-    return atr
+        # If you want to render this nicely in a template, you'd need `from flask import render_template`
+        # and then create an `orders.html` template. For now, we can just jsonify:
+        return jsonify(formatted_orders)
 
-def calculate_rsi(close, period):
-    delta = np.diff(close)
-    gain = np.maximum(delta, 0)
-    loss = np.maximum(-delta, 0)
-    avg_gain = np.convolve(gain, np.ones(period) / period, mode='valid')
-    avg_loss = np.convolve(loss, np.ones(period) / period, mode='valid')
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    logging.debug(f"RSI: {rsi}")
-    return rsi
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-def calculate_macd(close, fast, slow, signal):
-    if len(close) < slow:
-        logging.warning("Not enough data points for MACD calculation.")
-        return np.array([]), np.array([])
-
-    ema_fast = np.convolve(close, np.ones(fast) / fast, mode='valid')
-    ema_slow = np.convolve(close, np.ones(slow) / slow, mode='valid')
-
-    # Ensure ema_fast and ema_slow align
-    macd_line = ema_fast[-len(ema_slow):] - ema_slow
-    if len(macd_line) < signal:
-        logging.warning("Not enough MACD data points for signal line calculation.")
-        return macd_line, np.array([])
-
-    signal_line = np.convolve(macd_line, np.ones(signal) / signal, mode='valid')
-    return macd_line, signal_line
-
-def calculate_trend_direction(close, lower_band, upper_band):
-    trend_direction = np.zeros_like(close)
-    for i in range(1, len(close)):
-        if close[i] > lower_band[i]:
-            trend_direction[i] = 1  # Bullish
-        elif close[i] < upper_band[i]:
-            trend_direction[i] = -1  # Bearish
+# ============== HELPER FUNCTIONS ==============
+def wilder_smoothing(values, period):
+    """
+    ATR uses Wilder's smoothing:
+      atr[i] = ((atr[i-1]*(period-1)) + tr[i]) / period
+    """
+    result = [None]*len(values)
+    if len(values) < period:
+        return result
+    # Ensure no None values in the initial period
+    initial_values = [v for v in values[:period] if v is not None]
+    if len(initial_values) < period:
+        # Not enough valid values to compute ATR
+        return result
+    initial = sum(initial_values) / period
+    result[period-1] = initial
+    for i in range(period, len(values)):
+        if values[i] is None or result[i-1] is None:
+            result[i] = result[i-1] if i > 0 else None
         else:
-            trend_direction[i] = trend_direction[i - 1]  # Continue previous trend
+            current = ((result[i-1]*(period-1)) + values[i]) / period
+            result[i] = current
+    return result
 
-    logging.debug(f"Trend Direction: {trend_direction}")
-    return trend_direction
+def compute_atr(h_array, l_array, c_array, period):
+    """Compute Average True Range (ATR)"""
+    tr_list = []
+    for i in range(len(c_array)):
+        if i == 0:
+            # Initialize with the first True Range
+            tr = h_array[i] - l_array[i]
+            tr_list.append(tr)
+            continue
+        t1 = h_array[i] - l_array[i]
+        t2 = abs(h_array[i] - c_array[i-1])
+        t3 = abs(l_array[i] - c_array[i-1])
+        true_range = max(t1, t2, t3)
+        tr_list.append(true_range)
+    smooth = wilder_smoothing(tr_list, period)
+    return smooth
 
-def calculate_bands(high, low, atr, factor):
-    upper_band = (high + factor * atr)[-len(high):]
-    lower_band = (low - factor * atr)[-len(low):]
-    return upper_band, lower_band
+def run_kmeans(vol_data, hv_init, mv_init, lv_init):
+    """
+    Replicates the K-Means style clustering from Pine.
+    """
+    if len(vol_data) < 3:
+        logging.warning("Not enough data points for K-Means clustering.")
+        return None, None, None, 0, 0, 0
 
-# ============== CANDLE PROCESSING ==============
-def process_candle(high, low, close):
-    global high_values, low_values, close_values, position, latest_values
+    try:
+        amean = [hv_init]
+        bmean = [mv_init]
+        cmean = [lv_init]
 
-    high_values.append(high)
-    low_values.append(low)
-    close_values.append(close)
+        def means_stable(m):
+            if len(m) < 2:
+                return False
+            return math.isclose(m[-1], m[-2], rel_tol=1e-9, abs_tol=1e-9)
 
-    # Ensure we have enough data for the longest calculation requirement
-    if len(close_values) < max(ATR_LENGTH, MACD_SLOW, RSI_LENGTH):
-        logging.warning(f"Not enough data points for calculations. Current count: {len(close_values)}")
+        while True:
+            hv_cluster = []
+            mv_cluster = []
+            lv_cluster = []
+
+            cur_a = amean[-1]
+            cur_b = bmean[-1]
+            cur_c = cmean[-1]
+
+            for v in vol_data:
+                da = abs(v - cur_a)
+                db = abs(v - cur_b)
+                dc = abs(v - cur_c)
+                m_dist = min(da, db, dc)
+                if m_dist == da:
+                    hv_cluster.append(v)
+                elif m_dist == db:
+                    mv_cluster.append(v)
+                else:
+                    lv_cluster.append(v)
+
+            new_a = statistics.mean(hv_cluster) if hv_cluster else cur_a
+            new_b = statistics.mean(mv_cluster) if mv_cluster else cur_b
+            new_c = statistics.mean(lv_cluster) if lv_cluster else cur_c
+
+            amean.append(new_a)
+            bmean.append(new_b)
+            cmean.append(new_c)
+
+            stable_a = means_stable(amean)
+            stable_b = means_stable(bmean)
+            stable_c = means_stable(cmean)
+
+            if stable_a and stable_b and stable_c:
+                return new_a, new_b, new_c, len(hv_cluster), len(mv_cluster), len(lv_cluster)
+    except Exception as e:
+        logging.error(f"K-Means clustering failed: {e}", exc_info=True)
+        return None, None, None, 0, 0, 0
+
+
+##############################################################################
+#                            NEW SUPERTREND LOGIC                             #
+##############################################################################
+def compute_supertrend(i, factor, assigned_atr, st_array, dir_array, ub_array, lb_array):
+    """
+    Updated to a standard, stable SuperTrend approach:
+      - Basic Bands:   basic_upper = HL2 + factor*ATR,  basic_lower = HL2 - factor*ATR
+      - Final Bands:   Carry forward continuity from prior bars
+      - Direction:     Switch only when price crosses the opposite band
+    """
+    # If assigned_atr is None, just carry forward
+    if assigned_atr is None:
+        st_array[i]  = st_array[i-1] if i > 0 else None
+        dir_array[i] = dir_array[i-1] if i > 0 else 1
+        ub_array[i]  = ub_array[i-1] if i > 0 else None
+        lb_array[i]  = lb_array[i-1] if i > 0 else None
         return
 
-    # Calculate indicators
-    try:
-        atr = calculate_atr(np.array(high_values), np.array(low_values), np.array(close_values), ATR_LENGTH)
-        rsi = calculate_rsi(np.array(close_values), RSI_LENGTH)
-        macd_line, signal_line = calculate_macd(np.array(close_values), MACD_FAST, MACD_SLOW, MACD_SIGNAL)
+    # Basic upper/lower
+    hl2 = (high_array[i] + low_array[i]) / 2.0
+    basic_upper = hl2 + factor * assigned_atr
+    basic_lower = hl2 - factor * assigned_atr
 
-        # Skip if MACD or Signal Line calculations are not ready
-        if len(macd_line) == 0 or len(signal_line) == 0:
-            logging.warning("MACD or Signal Line calculation incomplete. Skipping this candle.")
-            return
+    if i == 0:
+        # Initialize on very first bar
+        dir_array[i] = 1  # or -1, but typically we default to up
+        ub_array[i] = basic_upper
+        lb_array[i] = basic_lower
+        st_array[i] = basic_lower  # choose one as the initial line
+        return
 
-        # Calculate trend bands
-        upper_band, lower_band = calculate_bands(np.array(high_values), np.array(low_values), atr[-1], ATR_FACTOR)
-        trend_direction = calculate_trend_direction(np.array(close_values), lower_band, upper_band)
+    # continuity from previous bar
+    prev_ub = ub_array[i-1]
+    prev_lb = lb_array[i-1]
+    if prev_ub is None:
+        prev_ub = basic_upper
+    if prev_lb is None:
+        prev_lb = basic_lower
 
-        # Update the latest indicator values
-        latest_values = {
-            "ATR": atr[-1],
-            "RSI": rsi[-1],
-            "MACD Line": macd_line[-1],
-            "Signal Line": signal_line[-1],
-            "Trend Direction": trend_direction[-1],
-            "Latest Close": close
-        }
+    # Calculate "final" bands with continuity
+    # Typically: final_upper[i] = (basic_upper[i] < final_upper[i-1] or close[i-1] > final_upper[i-1]) ? basic_upper : final_upper[i-1]
+    #           final_lower[i] = (basic_lower[i] > final_lower[i-1] or close[i-1] < final_lower[i-1]) ? basic_lower : final_lower[i-1]
+    new_ub = basic_upper
+    if (basic_upper > prev_ub) and (close_array[i-1] <= prev_ub):
+        new_ub = prev_ub
 
-        # Logging the updated indicator values
-        logging.info(f"Updated ATR: {latest_values['ATR']}")
-        logging.info(f"Updated RSI: {latest_values['RSI']}")
-        logging.info(f"Updated MACD Line: {latest_values['MACD Line']}, Signal Line: {latest_values['Signal Line']}")
-        logging.info(f"Updated Trend Direction: {latest_values['Trend Direction']}")
+    new_lb = basic_lower
+    if (basic_lower < prev_lb) and (close_array[i-1] >= prev_lb):
+        new_lb = prev_lb
 
-        # Evaluate trading signals
-        evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, close, upper_band, lower_band)
+    ub_array[i] = new_ub
+    lb_array[i] = new_lb
 
-    except Exception as e:
-        logging.error(f"Error in processing candle: {e}", exc_info=True)
+    # Figure out if previous ST was upper or lower, to know if we were in up/down
+    prev_st = st_array[i-1]
+    if prev_st is None:
+        # fallback if missing
+        prev_st = prev_lb if dir_array[i-1] == 1 else prev_ub
 
+    # If prev_st == prev_ub => we were in a downtrend
+    was_upper = (prev_st == prev_ub)
 
-def evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, latest_close, upper_band, lower_band):
-    global position
-
-    logging.info("Evaluating trading signals...")
-
-    long_condition = trend_direction[-1] == 1 and rsi[-1] > 50 and macd_line[-1] > signal_line[-1]
-    short_condition = trend_direction[-1] == -1 and rsi[-1] < 50 and macd_line[-1] < signal_line[-1]
-
-    if long_condition and position != "long":
-        logging.info("Buy signal detected.")
-        position = "long"
-        asyncio.create_task(place_order(SIDE_BUY, QTY))
-
-    elif short_condition and position != "short":
-        logging.info("Sell signal detected.")
-        position = "short"
-        asyncio.create_task(place_order(SIDE_SELL, QTY))
-
-    else:
-        logging.info("No trade signal detected.")
-
-async def place_order(side, quantity):
-    client = await AsyncClient.create(TESTNET_API_KEY, TESTNET_SECRET_KEY, testnet=True)
-    try:
-        logging.info(f"Placing {side} order for {quantity} {BINANCE_SYMBOL}...")
-        order = await client.create_order(
-            symbol=BINANCE_SYMBOL,
-            side=side,
-            type="MARKET",
-            quantity=quantity
-        )
-        logging.info(f"Order successful: {order}")
-    except Exception as e:
-        logging.error(f"Error placing order: {e}", exc_info=True)
-    finally:
-        await client.close_connection()
-
-# ============== HEARTBEAT LOGGING ==============
-def heartbeat_logging():
-    global latest_values
-    while True:
-        logging.info(f"Heartbeat - Latest Values: {latest_values}")
-        if latest_values.get("Position"):
-            logging.info(f"Current Position: {latest_values['Position']} - Latest Close: {latest_values['Latest Close']}")
+    if was_upper:
+        # We were in a downtrend
+        if close_array[i] > new_ub:
+            # Price has crossed above the upper band => flip to uptrend
+            dir_array[i] = 1
+            st_array[i] = new_lb
         else:
-            logging.info("Position is None or not set yet.")
-        time.sleep(60)  # Log every 60 seconds
+            # Stay in downtrend
+            dir_array[i] = -1
+            st_array[i] = new_ub
+    else:
+        # We were in an uptrend
+        if close_array[i] < new_lb:
+            # Price crosses below the lower band => flip to downtrend
+            dir_array[i] = -1
+            st_array[i] = new_ub
+        else:
+            # Stay in uptrend
+            dir_array[i] = 1
+            st_array[i] = new_lb
+
+# ============== ORDER EXECUTION (WITH STOP/TAKE PROFIT) ==============
+def execute_trade(side, qty, symbol, stop_loss=None, take_profit=None):
+    """
+    Places a market order on BINANCE TESTNET
+    """
+    try:
+        logging.info(f"Executing {side.upper()} {qty} {symbol} (SL={stop_loss}, TP={take_profit})")
+        # Step 1: Place the main order based on the side
+        if side.lower() == "buy":
+            order = testnet_api.order_market_buy(
+                symbol=symbol,
+                quantity=qty,
+            )
+        elif side.lower() == "sell":
+            order = testnet_api.order_market_sell(
+                symbol=symbol,
+                quantity=qty,
+            )
+        else:
+            raise ValueError(f"Invalid side value: {side}. Must be 'buy' or 'sell'.")
+
+        # Step 2: Place the OCO order based on the main order's side
+        oco_side = "SELL" if side.lower() == "buy" else "BUY"
+
+        oco_order = testnet_api.create_oco_order(
+            symbol=symbol,
+            side=oco_side,  # Opposite to the main order's side
+            quantity=qty,
+            stopPrice=stop_loss,       # Stop loss trigger price
+            stopLimitPrice=take_profit,  # Take profit price
+            stopLimitTimeInForce="GTC",  # Good till canceled
+        )
+
+    except Exception as e:
+        logging.error(f"Binance order failed: {e}", exc_info=True)
+
+# ============== LOGGING (HEARTBEAT) ==============
+def heartbeat_logging():
+    global last_heartbeat_time
+    while True:
+        now = time.time()
+        if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+            if len(close_array) > 0:
+                msg = "\n=== Heartbeat ===\n"
+                msg += "Bot is alive!\n"
+                msg += "=============="
+                logging.info(msg)
+            last_heartbeat_time = now
+        time.sleep(1)
+
+# ============== SIGNAL CHECKS FOR LONG & SHORT ==============
+def check_signals():
+    """Check for trade signals based on SuperTrend indicators"""
+    global in_position, position_side, entry_price
+
+    while True:
+        try:
+            if len(close_array) == 0:
+                time.sleep(SIGNAL_CHECK_INTERVAL)
+                continue
+
+            i = len(close_array) - 1
+            t = time_array[i]
+
+            p_dir = primary_direction[i]
+            s_dir = secondary_direction[i]
+            prim_st = primary_supertrend[i]
+            sec_st = secondary_supertrend[i]
+            prim_UB = primary_upperBand[i]
+            prim_LB = primary_lowerBand[i]
+            sec_UB = secondary_upperBand[i]
+            sec_LB = secondary_lowerBand[i]
+            atr = atr_array[i]
+            c_idx = cluster_assignments[i]
+            current_price = close_array[i]
+
+            if p_dir is None or s_dir is None or c_idx is None:
+                time.sleep(SIGNAL_CHECK_INTERVAL)
+                continue
+
+            # Check last 3 secondary directions for pullback pattern
+            if len(last_secondary_directions) >= 3:
+                # Extract last 3 directions
+                recent_3 = last_secondary_directions[-3:]
+                # Compute corresponding indices from the last 3 elements in close_array
+                indices = list(range(len(close_array) - 3, len(close_array)))
+
+                # LONG pattern: [1, -1, 1] within MAX_PULLBACK_CANDLES
+                bullish_bearish_bullish = (
+                    recent_3 == [1, -1, 1] and 
+                    (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES) and 
+                    (indices[-1] - indices[0] >= MIN_PULLBACK_CANDLES)
+                )
+
+                # SHORT pattern: [-1, 1, -1] within MAX_PULLBACK_CANDLES
+                bearish_bearish_bearish = (
+                    recent_3 == [-1, 1, -1] and
+                    (indices[-1] - indices[0] <= MAX_PULLBACK_CANDLES) and
+                    (indices[-1] - indices[0] >= MIN_PULLBACK_CANDLES)
+                )
+
+                # ============ LONG ENTRY ============
+                if bullish_bearish_bullish and p_dir == 1 and c_idx == 0:
+                    # Stop-loss = current bar's secondary ST line
+                    sl = sec_st
+                    dist = current_price - sl
+                    tp = current_price + (1.5 * dist)
+                    logging.info("Pullback BUY triggered!")
+                    execute_trade(
+                        side="buy",
+                        qty=QTY,
+                        symbol=SYMBOL_TESTNET,
+                        stop_loss=round(sl, 2),
+                        take_profit=round(tp, 2)
+                    )
+                    in_position = True
+                    position_side = "long"
+                    entry_price = current_price
+
+                # ============ SHORT ENTRY ============
+                if bearish_bearish_bearish and p_dir == -1 and c_idx == 0:
+                    sl = sec_st
+                    dist = sl - current_price
+                    tp = current_price - (1.5 * dist)
+                    logging.info("Pullback SHORT triggered!")
+                    execute_trade(
+                        side="sell",
+                        qty=QTY,
+                        symbol=SYMBOL_TESTNET,
+                        stop_loss=round(sl, 2),
+                        take_profit=round(tp, 2)
+                    )
+                    in_position = True
+                    position_side = "short"
+                    entry_price = current_price
+
+            cluster_str = f"{c_idx} (0=High,1=Med,2=Low)" if c_idx is not None else "None"
+            msg = "\n=== Heartbeat ===\n"
+            msg += f"Last Price: {close_array[i]:.2f}\n"
+            msg += f"Primary Dir: {p_dir}\n"
+            msg += f"Secondary Dir: {s_dir}\n"
+            msg += f"Cluster: {cluster_str}\n"
+            msg += f"ATR: {atr}\n"
+            msg += f"PriLB: {prim_LB}\n"
+            msg += f"PriUB: {prim_UB}\n"
+            msg += f"SecLB: {sec_LB}\n"
+            msg += f"SecUB: {sec_UB}\n"
+            msg += f"PriST: {prim_st}\n"
+            msg += f"SecST: {sec_st}\n"
+            msg += f"In Position: {in_position} ({position_side})\n"
+            msg += f"Entry Price: {entry_price}\n"
+            msg += "=============="
+            logging.info(msg)
+
+        except Exception as e:
+            logging.error(f"Error in check_signals loop: {e}", exc_info=True)
+
+        time.sleep(SIGNAL_CHECK_INTERVAL)
+
+# ============== WEBSOCKET CALLBACK ==============
+def on_message_candle(msg):
+    global hv_new, mv_new, lv_new  # Declare globals at the start of the function
+
+    if 'k' not in msg:
+        return
+
+    k = msg['k']
+    is_final = k['x']
+    close_price = float(k['c'])
+    high_price = float(k['h'])
+    low_price = float(k['l'])
+    open_time = k['t']
+
+    if is_final:
+        # Append new candle
+        time_array.append(open_time)
+        high_array.append(high_price)
+        low_array.append(low_price)
+        close_array.append(close_price)
+
+        # Trim to MAX_CANDLES
+        if len(time_array) > MAX_CANDLES:
+            time_array.pop(0)
+            high_array.pop(0)
+            low_array.pop(0)
+            close_array.pop(0)
+
+        # Recompute ATR
+        new_atr = compute_atr(high_array, low_array, close_array, ATR_LEN)
+        atr_array.clear()
+        atr_array.extend(new_atr)
+
+        # Trim atr_array if necessary
+        while len(atr_array) > len(close_array):
+            atr_array.pop(0)
+
+        # Adjust cluster_assignments length
+        while len(cluster_assignments) < len(close_array):
+            cluster_assignments.append(None)
+        while len(cluster_assignments) > len(close_array):
+            cluster_assignments.pop(0)
+
+        # Adjust primary/secondary arrays
+        def fix_arrays(st, di, ub, lb):
+            needed_len = len(close_array)
+            while len(st) < needed_len:
+                st.append(None)
+            while len(st) > needed_len:
+                st.pop(0)
+            while len(di) < needed_len:
+                di.append(None)
+            while len(di) > needed_len:
+                di.pop(0)
+            while len(ub) < needed_len:
+                ub.append(None)
+            while len(ub) > needed_len:
+                ub.pop(0)
+            while len(lb) < needed_len:
+                lb.append(None)
+            while len(lb) > needed_len:
+                lb.pop(0)
+
+        fix_arrays(primary_supertrend, primary_direction, primary_upperBand, primary_lowerBand)
+        fix_arrays(secondary_supertrend, secondary_direction, secondary_upperBand, secondary_lowerBand)
+
+        # Possibly run K-Means
+        data_count = len(close_array)
+        if data_count >= TRAINING_DATA_PERIOD and (not CLUSTER_RUN_ONCE or (CLUSTER_RUN_ONCE and hv_new is None)):
+            start_idx = data_count - TRAINING_DATA_PERIOD
+            vol_data = [x for x in atr_array[start_idx:] if x is not None]
+            if len(vol_data) == TRAINING_DATA_PERIOD:
+                upper_val = max(vol_data)
+                lower_val = min(vol_data)
+                hv_init = lower_val + (upper_val - lower_val)*HIGHVOL_PERCENTILE
+                mv_init = lower_val + (upper_val - lower_val)*MIDVOL_PERCENTILE
+                lv_init = lower_val + (upper_val - lower_val)*LOWVOL_PERCENTILE
+
+                hvf, mvf, lvf, _, _, _ = run_kmeans(vol_data, hv_init, mv_init, lv_init)
+                if hvf and mvf and lvf:
+                    hv_new, mv_new, lv_new = hvf, mvf, lvf
+                    logging.info(f"K-Means Finalized: HV={hv_new:.4f}, MV={mv_new:.4f}, LV={lv_new:.4f}")
+                else:
+                    logging.warning("K-Means did not finalize due to insufficient data or errors.")
+
+        # Assign cluster & compute supertrend for this bar
+        i = len(close_array)-1
+        assigned_centroid = None
+        vol = atr_array[i]
+
+        if hv_new is not None and mv_new is not None and lv_new is not None and vol is not None:
+            dA = abs(vol - hv_new)
+            dB = abs(vol - mv_new)
+            dC = abs(vol - lv_new)
+            distances = [dA, dB, dC]
+            c_idx = distances.index(min(distances))  # 0=High,1=Med,2=Low
+            cluster_assignments[i] = c_idx
+            assigned_centroid = [hv_new, mv_new, lv_new][c_idx]
+        else:
+            logging.warning("Assigned centroid is None. Skipping SuperTrend computation for this bar.")
+
+        # Compute / update SuperTrend if we have a valid ATR cluster
+        if assigned_centroid is not None:
+            compute_supertrend(
+                i, PRIMARY_FACTOR, assigned_centroid,
+                primary_supertrend, primary_direction,
+                primary_upperBand, primary_lowerBand 
+            )
+            compute_supertrend(
+                i, SECONDARY_FACTOR, assigned_centroid,
+                secondary_supertrend, secondary_direction,
+                secondary_upperBand, secondary_lowerBand
+            )
+        else:
+            # If we don't have a valid assigned_centroid, just carry forward
+            compute_supertrend(
+                i, PRIMARY_FACTOR, None,
+                primary_supertrend, primary_direction,
+                primary_upperBand, primary_lowerBand
+            )
+            compute_supertrend(
+                i, SECONDARY_FACTOR, None,
+                secondary_supertrend, secondary_direction,
+                secondary_upperBand, secondary_lowerBand
+            )
+
+        # Update last_secondary_directions
+        if secondary_direction[i] is not None:
+            last_secondary_directions.append(secondary_direction[i])
+            if len(last_secondary_directions) > 35:
+                last_secondary_directions.pop(0)
 
 # ============== BINANCE WEBSOCKET ==============
-async def start_binance_websocket():
-    logging.info("Initializing Binance WebSocket...")
-    client = await AsyncClient.create(TESTNET_API_KEY, TESTNET_SECRET_KEY, testnet=True)
-    bsm = BinanceSocketManager(client)
+def start_binance_websocket():
+    logging.info("Starting Binance WebSocket...")
+    twm = ThreadedWebsocketManager(api_key=BINANCE_API_KEY, api_secret=BINANCE_SECRET_KEY)
+    twm.start()
+    twm.start_kline_socket(
+        callback=on_message_candle,
+        symbol=BINANCE_SYMBOL,
+        interval=BINANCE_INTERVAL
+    )
+    twm.join()  # Block here
 
-    logging.info("Binance WebSocket initialized. Starting kline socket...")
-    async def handle_message(msg):
-        try:
-            kline = msg['k']  # Extract kline data
-            is_closed = kline['x']  # Check if the candle is closed
-            if is_closed:
-                high = float(kline['h'])
-                low = float(kline['l'])
-                close = float(kline['c'])
-                logging.debug(f"Raw Kline Data - High: {high}, Low: {low}, Close: {close}")
-                process_candle(high, low, close)
-        except Exception as e:
-            logging.error(f"Error while handling WebSocket message: {e}", exc_info=True)
-
-    try:
-        async with bsm.kline_socket(symbol=BINANCE_SYMBOL.lower(), interval=BINANCE_INTERVAL) as stream:
-            logging.info(f"Listening for kline data on {BINANCE_SYMBOL} with interval {BINANCE_INTERVAL}.")
-            while True:
-                msg = await stream.recv()
-                await handle_message(msg)
-    except Exception as e:
-        logging.error(f"WebSocket connection error: {e}", exc_info=True)
-    finally:
-        logging.info("Closing WebSocket connection...")
-        await client.close_connection()
-
-# ============== MAIN THREADS ==============
+# ============== MAIN ==============
 if __name__ == "__main__":
+    logging.info("Starting dual SuperTrend with long & short pullback logic...")
+
     # Start Flask app in a separate thread
     flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8080))
     flask_thread.daemon = True
     flask_thread.start()
     logging.info("Flask monitoring started on port 8080.")
 
-    # Start heartbeat logging in a separate thread
+    # Start the heartbeat logging thread
     hb_thread = threading.Thread(target=heartbeat_logging, daemon=True)
     hb_thread.start()
     logging.info("Heartbeat logging thread started.")
 
-    # Start asyncio tasks
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_binance_websocket())
+    # Start signals checking thread
+    signal_thread = threading.Thread(target=check_signals, daemon=True)
+    signal_thread.start()
+    logging.info("Signal checking thread started.")
+
+    # Start Binance WebSocket
+    try:
+        start_binance_websocket()
+    except Exception as e:
+        logging.error(f"Binance WebSocket error: {e}", exc_info=True)
+        sys.exit(1)
 
 
 
