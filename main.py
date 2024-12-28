@@ -200,12 +200,12 @@ def evaluate_trading_signals(atr, rsi, macd_line, signal_line, trend_direction, 
     long_condition = trend_direction[-1] == 1 and rsi[-1] > 50 and macd_line[-1] > signal_line[-1]
     short_condition = trend_direction[-1] == -1 and rsi[-1] < 50 and macd_line[-1] < signal_line[-1]
 
-    if long_condition:
+    if long_condition and position != "long":
         logging.info("Buy signal detected.")
         position = "long"
         asyncio.create_task(place_order(SIDE_BUY, QTY))
 
-    elif short_condition:
+    elif short_condition and position != "short":
         logging.info("Sell signal detected.")
         position = "short"
         asyncio.create_task(place_order(SIDE_SELL, QTY))
