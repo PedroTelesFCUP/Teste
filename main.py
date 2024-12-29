@@ -1,5 +1,6 @@
 import os
 from binance.client import Client
+from binance.enums import SIDE_SELL, ORDER_TYPE_MARKET
 
 # Load API key and secret from environment variables
 api_key = os.getenv("TESTNET_API_KEY")
@@ -8,14 +9,22 @@ api_secret = os.getenv("TESTNET_SECRET_KEY")
 # Initialize the Binance client for Testnet
 client = Client(api_key, api_secret, testnet=True)
 
-# Fetch account balances
-account_info = client.get_account()
+# Specify the trading pair and amount to sell
+symbol = "BTCUSDT"  # Trading pair
+quantity = 1.10500000  # Amount of BTC to sell
 
-# Display the asset balances
-print("Asset Balances:")
-for balance in account_info['balances']:
-    asset = balance['asset']
-    free_balance = balance['free']
-    locked_balance = balance['locked']
-    if float(free_balance) > 0 or float(locked_balance) > 0:  # Show only non-zero balances
-        print(f"{asset}: Free: {free_balance}, Locked: {locked_balance}")
+try:
+    # Place a market sell order
+    order = client.create_order(
+        symbol=symbol,
+        side=SIDE_SELL,
+        type=ORDER_TYPE_MARKET,
+        quantity=quantity
+    )
+
+    # Print order details
+    print("Order placed successfully:")
+    print(order)
+
+except Exception as e:
+    print(f"Error placing sell order: {e}")
