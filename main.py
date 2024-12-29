@@ -11,7 +11,7 @@ client = Client(api_key, api_secret, testnet=True)
 
 # Specify the trading pair and amount to sell
 symbol = "BTCUSDT"  # Trading pair
-quantity = 1.10500000  # Amount of BTC to sell
+quantity = 1.10000000  # Amount of BTC to sell
 
 try:
     # Place a market sell order
