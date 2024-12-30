@@ -1,10 +1,9 @@
 import os
 from decimal import Decimal, ROUND_DOWN
 from binance.client import Client
-from binance.enums import *
 
 # Testnet API credentials
-TESTNET_API_KEY = os.getenv("TESTNET_API_KEY", "YOUR_TESTNET_API_KEY")
+TESTNET_API_KEY = os.getenv("TESTNET_API_KEY", "YOUR_TESTNET_API_KEY")  
 TESTNET_SECRET_KEY = os.getenv("TESTNET_SECRET_KEY", "YOUR_TESTNET_SECRET_KEY")
 TESTNET_BASE_URL = "https://testnet.binance.vision"
 
@@ -46,7 +45,7 @@ def get_last_price(symbol):
 
 def place_binance_oco_order(symbol, qty, side, stop_loss, stop_loss_limit, take_profit):
     """
-    Places an OCO order on Binance Testnet with two orders: one for stop-loss and one for take-profit.
+    Places an OCO order on Binance Testnet.
 
     Args:
         symbol (str): Trading pair (e.g., "BTCUSDT").
@@ -59,7 +58,6 @@ def place_binance_oco_order(symbol, qty, side, stop_loss, stop_loss_limit, take_
     Returns:
         dict or None: Response from the OCO order if successful, otherwise None.
     """
-    side_lower = side.lower()
     try:
         # Fetch precision rules for the symbol
         symbol_info = testnet_api.get_symbol_info(symbol)
@@ -74,18 +72,19 @@ def place_binance_oco_order(symbol, qty, side, stop_loss, stop_loss_limit, take_
         # Define OCO parameters
         oco_params = {
             "symbol": symbol,
-            "side": "SELL" if side_lower == "buy" else "BUY",
+            "side": side,  # Use the original side 
             "quantity": str(qty),
-            "aboveType": "STOP_LOSS_LIMIT",     # Stop-loss type
-            "aboveStopPrice": stop_loss_str,    # Stop-loss activation price
-            "abovePrice": stop_loss_limit_str,  # Stop-loss limit price
-            "aboveTimeInForce": "GTC",          # Good-Till-Canceled
-            "belowType": "LIMIT_MAKER",         # Take-profit type
-            "belowPrice": take_profit_str       # Take-profit price
+            "timestamp": int(testnet_api.get_server_time()['serverTime']), # Add timestamp
+            "aboveType": "STOP_LOSS_LIMIT",      # Stop-loss type
+            "aboveStopPrice": stop_loss_str,     # Stop-loss activation price
+            "abovePrice": stop_loss_limit_str,   # Stop-loss limit price
+            "aboveTimeInForce": "GTC",           # Good-Till-Canceled
+            "belowType": "LIMIT_MAKER",          # Take-profit type
+            "belowPrice": take_profit_str        # Take-profit price
         }
 
-        # Place the OCO order
-        oco_order = testnet_api.create_oco_order(**oco_params)
+        # Place the OCO order 
+        oco_order = testnet_api.order_oco(**oco_params) 
         log_message(f"OCO order placed: SL={stop_loss_str}, SLL={stop_loss_limit_str}, TP={take_profit_str}")
 
         return oco_order
@@ -106,7 +105,7 @@ if __name__ == "__main__":
         STOP_LOSS_LIMIT = LAST_PRICE - 210
         TAKE_PROFIT = LAST_PRICE + 200
 
-        # Place the OCO order
+        # Place the OCO order (use the correct side "BUY")
         response = place_binance_oco_order(SYMBOL, QUANTITY, "BUY", STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT)
         print("OCO Order Response:", response)
     else:
