@@ -78,7 +78,7 @@ def place_binance_oco_order(symbol, qty, side, stop_loss, stop_loss_limit, take_
             "aboveType": "TAKE_PROFIT",      # take-profit type
             "abovePrice": take_profit_str,   # Stop-loss limit price
             "belowType": "STOP_LOSS",          # Take-profit type
-            "belowPrice":  stop_loss_str,       # Take-profit price
+            "belowPrice":  stop_loss_str       # Take-profit price
         }
 
         # Place the OCO order 
