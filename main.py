@@ -111,9 +111,9 @@ def place_binance_testnet_order(symbol, qty, side, stop_loss=0.0, take_profit=0.
                 # => stop_loss -> STOP_LOSS_LIMIT, take_profit -> LIMIT_MAKER
                 if side_lower == "buy":
                     oco_params.update({
-                        "abovePrice": stop_loss_str,     # STOP_LOSS_LIMIT limit price
-                        "aboveStopPrice": stop_loss_str, # the stop price
-                        "belowPrice": take_profit_str,   # LIMIT_MAKER price
+                        "abovePrice": take_profit_str,     # STOP_LOSS_LIMIT limit price
+                        "aboveStopPrice": take_profit_str, # the stop price
+                        "belowPrice": stop_loss_str,   # LIMIT_MAKER price
                     })
                 else:
                     # For a SELL -> OCO BUY scenario (less common),
