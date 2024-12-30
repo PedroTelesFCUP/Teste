@@ -77,10 +77,10 @@ def place_binance_oco_order(symbol, qty, side, stop_price, limit_price, take_pro
             "timestamp": int(testnet_api.get_server_time()['serverTime']),
             "aboveType": "STOP_LOSS_LIMIT",  
             "aboveStopPrice": stop_price_str,  
-            "abovePrice": take_profit_str,     
+            "abovePrice": limit_price_str,     
             "aboveTimeInForce": "GTC",
             "belowType": "LIMIT_MAKER",      
-            "belowPrice": limit_price_str
+            "belowPrice": take_profit_str    
         }
 
         # Place the OCO order
@@ -101,13 +101,12 @@ if __name__ == "__main__":
 
     if LAST_PRICE:
         # Define order price levels
-        TAKE_PROFIT_PRICE = LAST_PRICE + 200  # Take-profit activation price
-        LIMIT_PRICE = LAST_PRICE + 190  # Stop-loss limit price
-        STOP_PRICE = LAST_PRICE + 201 #- 200  # Take-profit price
+        STOP_PRICE = LAST_PRICE - 200  # Stop-loss activation price
+        LIMIT_PRICE = LAST_PRICE - 190  # Stop-loss limit price
+        TAKE_PROFIT_PRICE = LAST_PRICE + 200  # Take-profit price
 
         # Place the OCO order (use the correct side "BUY")
-        response = place_binance_oco_order(SYMBOL, QUANTITY, "BUY", STOP_PRICE, LIMIT_PRICE, TAKE_PROFIT_PRICE)  # Updated arguments
+        response = place_binance_oco_order(SYMBOL, QUANTITY, "SELL", STOP_PRICE, LIMIT_PRICE, TAKE_PROFIT_PRICE)  # Updated arguments
         print("OCO Order Response:", response)
     else:
         print("Failed to fetch the last price.")
-
