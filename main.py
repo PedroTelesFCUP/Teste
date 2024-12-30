@@ -102,7 +102,7 @@ if __name__ == "__main__":
     if LAST_PRICE:
         # Define order price levels
         STOP_PRICE = LAST_PRICE - 200  # Stop-loss activation price
-        LIMIT_PRICE = LAST_PRICE - 210  # Stop-loss limit price
+        LIMIT_PRICE = LAST_PRICE - 190  # Stop-loss limit price
         TAKE_PROFIT_PRICE = LAST_PRICE + 200  # Take-profit price
 
         # Place the OCO order (use the correct side "BUY")
