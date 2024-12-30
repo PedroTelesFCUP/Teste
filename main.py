@@ -75,12 +75,12 @@ def place_binance_oco_order(symbol, qty, side, stop_loss, stop_loss_limit, take_
             "side": side,  # Use the original side 
             "quantity": str(qty),
             "timestamp": int(testnet_api.get_server_time()['serverTime']), # Add timestamp
-            "aboveType": "STOP_LOSS_LIMIT",      # Stop-loss type
-            "aboveStopPrice": stop_loss_str,     # Stop-loss activation price
-            "abovePrice": stop_loss_limit_str,   # Stop-loss limit price
+            "aboveType": "TAKE_PROFIT",      # take-profit type
+            "abovePrice": take_profit_str,   # Stop-loss limit price
             "aboveTimeInForce": "GTC",           # Good-Till-Canceled
-            "belowType": "LIMIT_MAKER",          # Take-profit type
-            "belowPrice": take_profit_str        # Take-profit price
+            "belowType": "STOP_LOSS",          # Take-profit type
+            "belowPrice":  stop_loss_str       # Take-profit price
+            "belowTimeInForce": "GTC",           # Good-Till-Canceled
         }
 
         # Place the OCO order 
