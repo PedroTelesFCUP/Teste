@@ -92,17 +92,42 @@ def place_binance_testnet_order(symbol, qty, side, stop_loss=0.0, take_profit=0.
         # Place OCO only if both SL & TP > 0
         if float(stop_loss) > 0.0 and float(take_profit) > 0.0:
             try:
+                # side for OCO is the opposite of the direction we traded
+                # If we bought, we want to place a SELL OCO to close that position.
+                # If we sold, we want a BUY OCO to close that short, etc.
                 oco_side = "SELL" if side_lower == "buy" else "BUY"
 
-                oco_order = testnet_api.create_oco_order(
-                    symbol=symbol,
-                    side=oco_side,
-                    quantity=qty,
-                    price=take_profit_str,        # The take-profit limit price
-                    stopPrice=stop_loss_str,      # The stop-loss trigger price
-                    stopLimitPrice=stop_loss_str, # The stop-limit order price
-                    stopLimitTimeInForce="GTC",   # Good-Till-Canceled
-                )
+                oco_params = {
+                    "symbol": symbol,
+                    "side": oco_side,
+                    "quantity": str(qty),
+                    "aboveType": "STOP_LOSS_LIMIT",     # The "stop-loss-limit" portion
+                    "aboveTimeInForce": "GTC",
+                    "belowType": "LIMIT_MAKER",         # The "take-profit-limit" or limit_maker portion
+                }
+
+                # For a BUY -> OCO SELL scenario
+                # Typical assumption: stop_loss < currentPrice < take_profit
+                # => stop_loss -> STOP_LOSS_LIMIT, take_profit -> LIMIT_MAKER
+                if side_lower == "buy":
+                    oco_params.update({
+                        "abovePrice": stop_loss_str,     # STOP_LOSS_LIMIT limit price
+                        "aboveStopPrice": stop_loss_str, # the stop price
+                        "belowPrice": take_profit_str,   # LIMIT_MAKER price
+                    })
+                else:
+                    # For a SELL -> OCO BUY scenario (less common),
+                    # you might do the reverse logic if you want a buy stop-limit above the market
+                    # and a buy limit below the market for the "take profit" (in a short scenario).
+                    # Adjust if needed:
+                    oco_params.update({
+                        "abovePrice": stop_loss_str,
+                        "aboveStopPrice": stop_loss_str,
+                        "belowPrice": take_profit_str,
+                    })
+
+                # Attempt placing the OCO
+                oco_order = testnet_api.create_oco_order(**oco_params)
                 log_message(f"OCO order placed for SL={stop_loss_str}, TP={take_profit_str}, side={oco_side}")
 
             except Exception as e_oco:
@@ -132,4 +157,5 @@ if __name__ == "__main__":
         print("Order Response:", response)
     else:
         print("Failed to fetch the last price. Order not placed.")
+
 
