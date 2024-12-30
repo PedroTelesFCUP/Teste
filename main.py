@@ -84,7 +84,7 @@ def place_binance_oco_order(symbol, qty, side, stop_loss, stop_loss_limit, take_
         }
 
         # Place the OCO order 
-        oco_order = testnet_api.order_oco(**oco_params) 
+        oco_order = testnet_api.create_oco_order(**oco_params)
         log_message(f"OCO order placed: SL={stop_loss_str}, SLL={stop_loss_limit_str}, TP={take_profit_str}")
 
         return oco_order
