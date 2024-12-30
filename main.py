@@ -44,118 +44,71 @@ def get_last_price(symbol):
         log_message(f"Error fetching last price for {symbol}: {e}", level="ERROR")
         return None
 
-def place_binance_testnet_order(symbol, qty, side, stop_loss=0.0, take_profit=0.0):
+def place_binance_oco_order(symbol, qty, side, stop_loss, stop_loss_limit, take_profit):
     """
-    Places a market order and optionally an OCO order on Binance Testnet.
+    Places an OCO order on Binance Testnet with two orders: one for stop-loss and one for take-profit.
 
     Args:
         symbol (str): Trading pair (e.g., "BTCUSDT").
         qty (float): Quantity to trade.
         side (str): "BUY" or "SELL".
-        stop_loss (float): Stop-loss activation price (optional).
-        take_profit (float): Take-profit limit price (optional).
+        stop_loss (float): Stop-loss activation price.
+        stop_loss_limit (float): Stop-loss limit price.
+        take_profit (float): Take-profit limit price.
 
     Returns:
-        dict or None: Response from main market order if successful, otherwise None.
+        dict or None: Response from the OCO order if successful, otherwise None.
     """
     side_lower = side.lower()
     try:
-        # 1) Fetch precision rules for the symbol
+        # Fetch precision rules for the symbol
         symbol_info = testnet_api.get_symbol_info(symbol)
         price_filter = next(f for f in symbol_info["filters"] if f["filterType"] == "PRICE_FILTER")
         tick_size = float(price_filter["tickSize"])
 
-        # Format stop_loss & take_profit with correct precision
+        # Format prices with correct precision
         stop_loss_str = format_price(stop_loss, tick_size)
+        stop_loss_limit_str = format_price(stop_loss_limit, tick_size)
         take_profit_str = format_price(take_profit, tick_size)
 
-        # Place the main market order in its own try
-        try:
-            if side_lower == "buy":
-                order = testnet_api.order_market_buy(symbol=symbol, quantity=qty)
-            elif side_lower == "sell":
-                order = testnet_api.order_market_sell(symbol=symbol, quantity=qty)
-            else:
-                raise ValueError(f"Invalid side: {side}. Must be 'buy' or 'sell'.")
+        # Define OCO parameters
+        oco_params = {
+            "symbol": symbol,
+            "side": "SELL" if side_lower == "buy" else "BUY",
+            "quantity": str(qty),
+            "aboveType": "STOP_LOSS_LIMIT",     # Stop-loss type
+            "aboveStopPrice": stop_loss_str,    # Stop-loss activation price
+            "abovePrice": stop_loss_limit_str,  # Stop-loss limit price
+            "aboveTimeInForce": "GTC",          # Good-Till-Canceled
+            "belowType": "LIMIT_MAKER",         # Take-profit type
+            "belowPrice": take_profit_str       # Take-profit price
+        }
 
-            log_message(f"Main market order placed. side={side}, qty={qty}, symbol={symbol}")
+        # Place the OCO order
+        oco_order = testnet_api.create_oco_order(**oco_params)
+        log_message(f"OCO order placed: SL={stop_loss_str}, SLL={stop_loss_limit_str}, TP={take_profit_str}")
 
-            # Indicate we are in position if order is not None
-            bot_status["in_position"] = True
-            bot_status["position_size"] = qty
-            bot_status["last_trade_price"] = bot_status["current_price"]
-
-        except Exception as e_main:
-            log_message(f"Error placing main {side} market order: {e_main}", level="ERROR")
-            return None
-
-        # Place OCO only if both SL & TP > 0
-        if float(stop_loss) > 0.0 and float(take_profit) > 0.0:
-            try:
-                # side for OCO is the opposite of the direction we traded
-                # If we bought, we want to place a SELL OCO to close that position.
-                # If we sold, we want a BUY OCO to close that short, etc.
-                oco_side = "SELL" if side_lower == "buy" else "BUY"
-
-                oco_params = {
-                    "symbol": symbol,
-                    "side": oco_side,
-                    "quantity": str(qty),
-                    "aboveType": "STOP_LOSS_LIMIT",     # The "stop-loss-limit" portion
-                    "aboveTimeInForce": "GTC",
-                    "belowType": "LIMIT_MAKER",         # The "take-profit-limit" or limit_maker portion
-                }
-
-                # For a BUY -> OCO SELL scenario
-                # Typical assumption: stop_loss < currentPrice < take_profit
-                # => stop_loss -> STOP_LOSS_LIMIT, take_profit -> LIMIT_MAKER
-                if side_lower == "buy":
-                    oco_params.update({
-                        "abovePrice": take_profit_str,     # STOP_LOSS_LIMIT limit price
-                        "aboveStopPrice": take_profit_str, # the stop price
-                        "belowPrice": stop_loss_str,   # LIMIT_MAKER price
-                    })
-                else:
-                    # For a SELL -> OCO BUY scenario (less common),
-                    # you might do the reverse logic if you want a buy stop-limit above the market
-                    # and a buy limit below the market for the "take profit" (in a short scenario).
-                    # Adjust if needed:
-                    oco_params.update({
-                        "abovePrice": stop_loss_str,
-                        "aboveStopPrice": stop_loss_str,
-                        "belowPrice": take_profit_str,
-                    })
-
-                # Attempt placing the OCO
-                oco_order = testnet_api.create_oco_order(**oco_params)
-                log_message(f"OCO order placed for SL={stop_loss_str}, TP={take_profit_str}, side={oco_side}")
-
-            except Exception as e_oco:
-                log_message(f"Error placing OCO order: {e_oco}", level="ERROR")
-        else:
-            log_message("No OCO order placed (stop_loss or take_profit <= 0).")
-
-        return order
+        return oco_order
 
     except Exception as e:
-        log_message(f"Error in place_binance_testnet_order: {e}", level="ERROR")
+        log_message(f"Error placing OCO order: {e}", level="ERROR")
         return None
 
 # Main execution
 if __name__ == "__main__":
     SYMBOL = "BTCUSDT"
-    QUANTITY = 0.001  # Example quantity
+    QUANTITY = 0.001
+    LAST_PRICE = get_last_price(SYMBOL)
 
-    # Fetch the last price for the symbol
-    last_price = get_last_price(SYMBOL)
-    if last_price is not None:
-        TAKE_PROFIT = last_price + 200
-        STOP_LOSS = last_price - 200
+    if LAST_PRICE:
+        # Define stop-loss and take-profit levels
+        STOP_LOSS = LAST_PRICE - 200
+        STOP_LOSS_LIMIT = LAST_PRICE - 210
+        TAKE_PROFIT = LAST_PRICE + 200
 
-        # Call the function
-        response = place_binance_testnet_order(SYMBOL, QUANTITY, "BUY", STOP_LOSS, TAKE_PROFIT)
-        print("Order Response:", response)
+        # Place the OCO order
+        response = place_binance_oco_order(SYMBOL, QUANTITY, "BUY", STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT)
+        print("OCO Order Response:", response)
     else:
-        print("Failed to fetch the last price. Order not placed.")
-
+        print("Failed to fetch the last price.")
 
