@@ -101,9 +101,9 @@ if __name__ == "__main__":
 
     if LAST_PRICE:
         # Define order price levels
-        STOP_PRICE = LAST_PRICE - 200  # Stop-loss activation price
-        LIMIT_PRICE = LAST_PRICE - 190  # Stop-loss limit price
-        TAKE_PROFIT_PRICE = LAST_PRICE + 200  # Take-profit price
+        STOP_PRICE = LAST_PRICE + 200  # Stop-loss activation price
+        LIMIT_PRICE = LAST_PRICE + 190  # Stop-loss limit price
+        TAKE_PROFIT_PRICE = LAST_PRICE - 200  # Take-profit price
 
         # Place the OCO order (use the correct side "BUY")
         response = place_binance_oco_order(SYMBOL, QUANTITY, "BUY", STOP_PRICE, LIMIT_PRICE, TAKE_PROFIT_PRICE)  # Updated arguments
